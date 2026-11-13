@@ -1,0 +1,5 @@
+{
+  "name": "@northwind/ui",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@northwind/marketing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev"
+  }
+}

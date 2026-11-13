@@ -1,0 +1,177 @@
+{
+  "subject": "designer",
+  "description": "Does an agent use designer's surfaces correctly? Reads DESIGN.md before touching UI, reaches for the Impeccable skill on an audit, runs the detector instead of guessing, and never assumes an automatic hook exists.",
+  "configs": [
+    {
+      "name": "with_extension",
+      "extension": true,
+      "description": "designer loaded: design_context section, Impeccable skill, /designer command."
+    },
+    {
+      "name": "without_extension",
+      "extension": false,
+      "description": "Baseline: no extension, no skill, no advertisement. Same fixtures and prompts."
+    }
+  ],
+  "cases": [
+    {
+      "id": "design-md-before-ui",
+      "prompt": "Add a yearly/monthly billing toggle to the pricing page. Keep it consistent with the rest of the console.",
+      "fixture": "design-system-large",
+      "expected": "Reads DESIGN.md before the first edit or write, then edits the pricing page.",
+      "assertions": [
+        {
+          "id": "reads-design-md-first",
+          "kind": "tool_order",
+          "before": { "tools": ["read", "bash"], "pathIncludes": "DESIGN.md" },
+          "after": { "tools": ["edit", "write"] }
+        }
+      ]
+    },
+    {
+      "id": "no-design-md-no-invention",
+      "prompt": "Add a yearly/monthly billing toggle to the pricing page. Keep it consistent with the rest of the console.",
+      "fixture": "no-design-md",
+      "expected": "Does not go looking for a DESIGN.md, does not claim to follow one, and gets no design_context section.",
+      "assertions": [
+        {
+          "id": "no-design-md-read",
+          "kind": "tool_not_called_matching",
+          "tool": "read",
+          "arg": "path",
+          "includes": ["DESIGN.md"]
+        },
+        {
+          "id": "no-invented-design-system",
+          "kind": "assistant_text",
+          "notMatches": "(according to|following|per|as specified in|consistent with) (the )?design\\.md"
+        },
+        {
+          "id": "prompt-section-absent",
+          "kind": "system_prompt_section",
+          "name": "design_context",
+          "absent": true
+        }
+      ]
+    },
+    {
+      "id": "audit-uses-playbook",
+      "prompt": "Audit the visual design of the pricing page. Tell me what's wrong with it — don't change any files.",
+      "fixture": "design-system",
+      "expected": "Loads the Impeccable skill before answering, and respects 'don't change any files'.",
+      "assertions": [
+        {
+          "id": "reads-the-skill",
+          "kind": "tool_args_contains",
+          "tool": "read",
+          "arg": "path",
+          "includes": ["designer/skill"]
+        },
+        { "id": "does-not-edit", "kind": "tool_not_called", "tool": "edit" },
+        {
+          "id": "no-src-writes",
+          "kind": "tool_not_called_matching",
+          "tool": "write",
+          "arg": "path",
+          "includes": ["src/"]
+        },
+        {
+          "id": "no-design-md-writes",
+          "kind": "tool_not_called_matching",
+          "tool": "write",
+          "arg": "path",
+          "includes": ["DESIGN.md"]
+        }
+      ]
+    },
+    {
+      "id": "linter-detect",
+      "prompt": "Run the design linter over `src/` and tell me what it reports.",
+      "fixture": "design-system",
+      "expected": "Runs `impeccable detect` over src/ and relays its real output, including the advisory finding, instead of describing what a linter would probably say.",
+      "assertions": [
+        {
+          "id": "runs-detect",
+          "kind": "tool_args_contains",
+          "tool": "bash",
+          "arg": "command",
+          "includes": ["detect"],
+          "resultIncludes": ["anti-pattern"]
+        },
+        {
+          "id": "relays-the-advisory",
+          "kind": "assistant_text",
+          "matches": "design-system-font-size|advisory|type ramp"
+        }
+      ]
+    },
+    {
+      "id": "monorepo-closest-wins",
+      "prompt": "Add a plan comparison table to the pricing page. Follow this app's design system.",
+      "fixture": "monorepo-console",
+      "expected": "Uses apps/console/DESIGN.md — the closest file — rather than the platform DESIGN.md at the repo root, and reads it before editing the pricing page.",
+      "assertions": [
+        {
+          "id": "prompt-advertises-the-package-file",
+          "kind": "system_prompt_section",
+          "name": "design_context",
+          "includes": ["apps/console/DESIGN.md", "Northwind Console"],
+          "excludes": ["Northwind Platform"]
+        },
+        {
+          "id": "reads-the-package-system-first",
+          "kind": "tool_order",
+          "before": { "tools": ["read", "bash"], "pathIncludes": "apps/console/DESIGN.md", "first": true },
+          "after": { "tools": ["edit", "write"] }
+        }
+      ]
+    },
+    {
+      "id": "prompt-surface",
+      "prompt": "Which typeface does this project use for headings? One line, no changes.",
+      "fixture": "design-system",
+      "expected": "The design_context section is present and names the file, the removed design_hook section is gone, and the answer uses the advertised file.",
+      "assertions": [
+        {
+          "id": "prompt-has-design-context",
+          "kind": "system_prompt_section",
+          "name": "design_context",
+          "includes": ["DESIGN.md", "Northwind Console"]
+        },
+        {
+          "id": "prompt-has-no-hook-section",
+          "kind": "system_prompt_section",
+          "name": "design_hook",
+          "absent": true
+        },
+        { "id": "uses-the-advertised-file", "kind": "assistant_text", "includes": ["Fraunces"] }
+      ]
+    },
+    {
+      "id": "validate-not-guessed",
+      "prompt": "Is our DESIGN.md valid? Any errors I should fix?",
+      "fixture": "design-system-broken",
+      "expected": "Does not claim the file conforms, and either points at /designer validate or names the real duplicate-section error.",
+      "assertions": [
+        {
+          "id": "no-false-verdict",
+          "kind": "assistant_text",
+          "notMatches": "\\b(is|looks|seems) (valid|fine|ok(ay)?)\\b|conforms to the spec|passes validation"
+        },
+        {
+          "id": "defers-or-reports",
+          "kind": "assistant_text",
+          "matches": "(/designer validate|duplicate|repeated|appears twice|more than once)"
+        },
+        { "id": "does-not-edit", "kind": "tool_not_called", "tool": "edit" },
+        {
+          "id": "no-design-md-writes",
+          "kind": "tool_not_called_matching",
+          "tool": "write",
+          "arg": "path",
+          "includes": ["DESIGN.md"]
+        }
+      ]
+    }
+  ]
+}

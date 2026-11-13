@@ -1,0 +1,32 @@
+{
+  "name": "@jalbarran/pi-designer",
+  "version": "0.1.0",
+  "description": "DESIGN.md ownership and manual Impeccable design audits for pi",
+  "keywords": [
+    "pi-package"
+  ],
+  "author": "Juan Albarran <jalbarrandev@gmail.com>",
+  "license": "MIT",
+  "files": [
+    "extensions",
+    "README.md",
+    "NOTICE",
+    "LICENSE",
+    "package.json"
+  ],
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test/spec.ts",
+    "eval": "bun evals/run-evals.ts",
+    "eval:grade": "bun evals/grade-evals.ts",
+    "eval:test": "bun evals/test-grade.ts",
+    "sync:upstream": "bun extensions/designer/scripts/sync-upstream.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@types/node": "26",
+    "bun-types": "latest",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "northwind",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "bun --cwd apps/console dev",
+    "test": "bun test"
+  }
+}

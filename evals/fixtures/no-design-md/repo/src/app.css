@@ -1,0 +1,23 @@
+:root {
+	--color-primary: #2f5d50;
+	--color-surface: #ffffff;
+	--color-canvas: #f6f5f1;
+	--color-ink: #1c1b19;
+	--color-muted: #6b6862;
+	--color-hairline: color-mix(in oklab, var(--color-ink) 10%, transparent);
+
+	--radius-sm: 4px;
+	--radius-md: 8px;
+
+	--font-heading: Fraunces, Georgia, serif;
+	--font-body: "Public Sans", system-ui, sans-serif;
+}
+
+body {
+	margin: 0;
+	background: var(--color-canvas);
+	color: var(--color-ink);
+	font-family: var(--font-body);
+	font-size: 0.9375rem;
+	line-height: 1.5;
+}

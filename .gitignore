@@ -1,0 +1,4 @@
+node_modules/
+evals/workspace/
+*.tsbuildinfo
+.DS_Store

@@ -1,0 +1,4 @@
+{
+  "description": "A Bun-workspaces monorepo with a platform DESIGN.md at the root and a denser one in apps/console. The run starts in apps/console (fixture cwd), so discovery must pick the closest file, not the root one.",
+  "cwd": "apps/console"
+}

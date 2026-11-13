@@ -7,7 +7,10 @@
  * project-relative paths (`.pi/skills/impeccable/scripts/impeccable`) into the
  * guidance, which is correct for a repo-root install and wrong for a user-level
  * extension. So this script copies the generated Pi tree and rewrites those
- * paths to the extension's own absolute location.
+ * paths to `<skill-base-dir>/scripts` — the placeholder upstream already uses for
+ * the first command and SKILL.md defines, resolved per machine at load time.
+ * Baking this machine's absolute path would ship instructions that only work for
+ * the developer who ran the sync.
  *
  * Usage, from this extension directory:
  *   bun scripts/sync-upstream.mjs
@@ -34,6 +37,27 @@ const REWRITABLE = /\.(md|json|js|mjs|cjs|sh|cmd|txt|toml|ya?ml)$/i;
 /** What upstream bakes into its Pi build, and what a relocated install must say. */
 const BAKED_PREFIX = ".pi/skills/impeccable";
 const BAKED_SCRIPTS = `${BAKED_PREFIX}/scripts`;
+const REWRITE_TO = "<skill-base-dir>/scripts";
+
+/**
+ * Upstream prose that only holds inside its own repo layout, patched after the
+ * path rewrite. A miss warns instead of failing: upstream wording churns, and
+ * the path rewrite is the part that has to be exactly right.
+ */
+const PATCHES = [
+	{
+		file: "SKILL.md",
+		from: "and `<skill-base-dir>/scripts` is the fallback only when the runtime reports no base directory",
+		to: "and when the runtime reports no base directory, use the `skill/scripts` directory of the installed pi-designer extension",
+	},
+	{
+		// A literal path in an allowed-tools pattern; this extension's launcher is
+		// reached through the skill dir or a PATH symlink, never a fixed absolute path.
+		file: "SKILL.md",
+		from: "  - Bash(<skill-base-dir>/scripts/impeccable *)",
+		to: "  - Bash(impeccable *)",
+	},
+];
 
 function parseArgs(argv) {
 	const args = { source: process.env.IMPECCABLE_UPSTREAM ?? DEFAULT_UPSTREAM, dryRun: false };
@@ -93,13 +117,14 @@ const manifest = {
 	skillVersion: skillVersion(sourceSkill),
 	engineVersion: readFileSync(join(sourceSkill, "scripts", "VERSION"), "utf8").trim(),
 	rewrittenFrom: BAKED_SCRIPTS,
-	rewrittenTo: join(SKILL_DEST, "scripts"),
+	rewrittenTo: REWRITE_TO,
 };
 console.log(`Impeccable ${manifest.skillVersion} (engine ${manifest.engineVersion}) at ${manifest.commit}`);
 console.log(`Vendoring ${before} files from ${sourceSkill}`);
 
 if (options.dryRun) {
-	console.log(`Would write ${SKILL_DEST} and rewrite ${BAKED_SCRIPTS} -> ${manifest.rewrittenTo}`);
+	console.log(`Would write ${SKILL_DEST} and rewrite ${BAKED_SCRIPTS} -> ${REWRITE_TO}`);
+	console.log(`Would apply ${PATCHES.length} text patch(es)`);
 	process.exit(0);
 }
 
@@ -107,9 +132,8 @@ rmSync(SKILL_DEST, { recursive: true, force: true });
 mkdirSync(SKILL_DEST, { recursive: true });
 cpSync(sourceSkill, SKILL_DEST, { recursive: true, preserveTimestamps: true });
 
-// Rewrite the baked-in paths. `<skill-base-dir>` is what the skill documents,
-// but a literal absolute path means every instruction stays executable even
-// when the runtime reports no base directory.
+// Rewrite the baked-in paths to the placeholder SKILL.md defines, so the tree is
+// identical for every install and the runtime supplies the real directory.
 let rewrittenFiles = 0;
 let rewrittenOccurrences = 0;
 for (const file of listFiles(SKILL_DEST)) {
@@ -119,9 +143,21 @@ for (const file of listFiles(SKILL_DEST)) {
 	if (!text.includes(BAKED_SCRIPTS)) continue;
 
 	const occurrences = text.split(BAKED_SCRIPTS).length - 1;
-	writeFileSync(target, text.split(BAKED_SCRIPTS).join(manifest.rewrittenTo), { mode: statSync(target).mode });
+	writeFileSync(target, text.split(BAKED_SCRIPTS).join(REWRITE_TO), { mode: statSync(target).mode });
 	rewrittenFiles++;
 	rewrittenOccurrences += occurrences;
+}
+
+let patched = 0;
+for (const patch of PATCHES) {
+	const target = join(SKILL_DEST, patch.file);
+	const text = readFileSync(target, "utf8");
+	if (!text.includes(patch.from)) {
+		console.warn(`warning: patch no longer matches ${patch.file}, review upstream's wording:\n  ${patch.from}`);
+		continue;
+	}
+	writeFileSync(target, text.replace(patch.from, patch.to), { mode: statSync(target).mode });
+	patched++;
 }
 
 // Fail loudly if upstream changes its path shape: a silent miss leaves the agent
@@ -137,6 +173,7 @@ if (leftovers.length > 0) {
 
 manifest.rewrittenFiles = rewrittenFiles;
 manifest.rewrittenOccurrences = rewrittenOccurrences;
+manifest.patchedStatements = patched;
 manifest.files = before;
 writeFileSync(join(SKILL_DEST, "UPSTREAM.json"), `${JSON.stringify(manifest, null, "\t")}\n`);
 
@@ -147,4 +184,5 @@ if (!(statSync(launcher).mode & 0o111)) {
 }
 
 console.log(`Rewrote ${rewrittenOccurrences} path reference(s) in ${rewrittenFiles} file(s)`);
+console.log(`Patched ${patched}/${PATCHES.length} statement(s)`);
 console.log(`Wrote ${SKILL_DEST}`);

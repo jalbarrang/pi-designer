@@ -5,8 +5,9 @@
 	"skillVersion": "4.5.0",
 	"engineVersion": "0.1.11",
 	"rewrittenFrom": ".pi/skills/impeccable/scripts",
-	"rewrittenTo": "/Users/jalbarran/.pi/agent/extensions/designer/skill/scripts",
+	"rewrittenTo": "<skill-base-dir>/scripts",
 	"rewrittenFiles": 16,
 	"rewrittenOccurrences": 75,
+	"patchedStatements": 2,
 	"files": 57
 }

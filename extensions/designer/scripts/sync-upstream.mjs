@@ -13,9 +13,11 @@
  * the developer who ran the sync.
  *
  * Usage, from this extension directory:
- *   bun scripts/sync-upstream.mjs
  *   bun scripts/sync-upstream.mjs --source /path/to/impeccable
- *   bun scripts/sync-upstream.mjs --dry-run
+ *   bun scripts/sync-upstream.mjs --source /path/to/impeccable --dry-run
+ *
+ * The source is required (`--source`, or `IMPECCABLE_UPSTREAM`): there is no
+ * checkout to guess, and a public repo has no business naming one.
  *
  * The engine binary is NOT copied: the bundled `scripts/impeccable` launcher
  * downloads the version-pinned release into ~/.impeccable/bin/<version>/ and
@@ -31,7 +33,6 @@ const HERE = dirname(dirname(fileURLToPath(import.meta.url)));
 const SKILL_DEST = join(HERE, "skill");
 /** Upstream provider output for Pi, relative to the upstream repo root. */
 const SKILL_SOURCE = join(".pi", "skills", "impeccable");
-const DEFAULT_UPSTREAM = "/Users/jalbarran/fun/drekki/impeccable";
 /** Text files carrying baked-in paths; binaries would be corrupted by a rewrite. */
 const REWRITABLE = /\.(md|json|js|mjs|cjs|sh|cmd|txt|toml|ya?ml)$/i;
 /** What upstream bakes into its Pi build, and what a relocated install must say. */
@@ -59,12 +60,22 @@ const PATCHES = [
 	},
 ];
 
+const USAGE =
+	"usage: bun scripts/sync-upstream.mjs --source <impeccable checkout> [--dry-run]\n       (or set IMPECCABLE_UPSTREAM)";
+
 function parseArgs(argv) {
-	const args = { source: process.env.IMPECCABLE_UPSTREAM ?? DEFAULT_UPSTREAM, dryRun: false };
+	const args = { source: process.env.IMPECCABLE_UPSTREAM, dryRun: false };
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--source") args.source = argv[++i];
 		else if (argv[i] === "--dry-run") args.dryRun = true;
-		else throw new Error(`unknown argument: ${argv[i]}`);
+		else {
+			console.error(`unknown argument: ${argv[i]}\n${USAGE}`);
+			process.exit(1);
+		}
+	}
+	if (!args.source) {
+		console.error(USAGE);
+		process.exit(1);
 	}
 	return { ...args, source: resolve(args.source) };
 }
@@ -98,12 +109,34 @@ function upstreamCommit(source) {
 	}
 }
 
+/**
+ * The upstream repo's identity, not the local checkout's path: this manifest is
+ * provenance for whoever reads the tree, and a home directory means nothing to
+ * them or to a checkout that later moves.
+ *
+ * Prefers the `upstream` remote when it contains HEAD, so the recorded URL and
+ * commit resolve together; a fork's `origin` is the fallback.
+ */
+function upstreamRepo(source) {
+	try {
+		const branches = execFileSync("git", ["-C", source, "branch", "-r", "--contains", "HEAD"], { encoding: "utf8" })
+			.trim()
+			.split("\n")
+			.map((line) => line.replace(/^[*+]\s*/, "").trim());
+		const remote = branches.some((branch) => branch.startsWith("upstream/")) ? "upstream" : "origin";
+		const url = execFileSync("git", ["-C", source, "remote", "get-url", remote], { encoding: "utf8" }).trim();
+		return url.replace(/^git\+/, "").replace(/^git@([^:]+):/, "https://$1/").replace(/\.git$/, "");
+	} catch {
+		return "unknown";
+	}
+}
+
 const options = parseArgs(process.argv.slice(2));
 const sourceSkill = join(options.source, SKILL_SOURCE);
 
 if (!existsSync(join(sourceSkill, "SKILL.md"))) {
 	console.error(
-		`No Impeccable Pi build at ${sourceSkill}\nRun \`bun run build:skills\` in ${options.source}, or pass --source <repo>.`,
+		`No Impeccable Pi build at ${sourceSkill}\nRun \`bun run build:skills\` in ${options.source}.`,
 	);
 	process.exit(1);
 }
@@ -111,7 +144,7 @@ if (!existsSync(join(sourceSkill, "SKILL.md"))) {
 const files = listFiles(sourceSkill);
 const before = files.length;
 const manifest = {
-	source: options.source,
+	source: upstreamRepo(options.source),
 	sourceSkill: SKILL_SOURCE,
 	commit: upstreamCommit(options.source),
 	skillVersion: skillVersion(sourceSkill),

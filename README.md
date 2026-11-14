@@ -122,15 +122,18 @@ bun extensions/designer/scripts/sync-upstream.mjs --source <path-to-impeccable>
 bun extensions/designer/scripts/sync-upstream.mjs --dry-run
 ```
 
-`--source` defaults to the maintainer's own checkout, so pass it (or set `IMPECCABLE_UPSTREAM`) unless you
-happen to be them.
+`--source` is required, or set `IMPECCABLE_UPSTREAM`: there is no checkout to guess.
 
 Pull and rebuild upstream first (`git pull && bun run build:skills`). The script copies the generated
 `.pi/skills/impeccable` tree and rewrites the scripts path upstream bakes into its guidance
 (`.pi/skills/impeccable/scripts`) to `<skill-base-dir>/scripts` — the placeholder `SKILL.md` already defines,
-resolved by the runtime rather than frozen to one machine's home directory. It records the source commit,
-skill version, and engine version in `skill/UPSTREAM.json`, and fails loudly if upstream changes its path
-shape rather than leaving instructions that point at a missing directory.
+resolved by the runtime rather than frozen to one machine's home directory. It records the upstream repo URL,
+commit, skill version, and engine version in `skill/UPSTREAM.json`, and fails loudly if upstream changes its
+path shape rather than leaving instructions that point at a missing directory.
+
+That manifest is provenance, not wiring: it says which upstream commit this tree started from, and nothing
+reads it at runtime. Once the vendored guidance is edited in place instead of re-synced, it is the record of
+the fork point.
 
 `extensions/designer/skill/` is generated. Do not hand-edit it; fixes belong upstream.
 

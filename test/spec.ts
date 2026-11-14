@@ -5,7 +5,7 @@
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const failures: string[] = [];
@@ -382,9 +382,12 @@ for (const missing of ["document", "audit"]) {
 
 rmSync(base, { recursive: true, force: true });
 
-// --- the real project file -------------------------------------------------
+// --- a real project file, when this machine has one ------------------------
 
-const torena = "/Users/jalbarran/fun/torena-hub/DESIGN.md";
+/** Sample `DESIGN.md` from a sibling checkout; the run skips when it is absent. */
+const torena =
+	process.env.DESIGNER_SAMPLE_DESIGN ??
+	resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "torena-hub", "DESIGN.md");
 try {
 	const real = analyzeDesign(readFileSync(torena, "utf8"));
 	check("torena-hub: no spec errors", !severities(real).includes("error"), summarize(real.findings));

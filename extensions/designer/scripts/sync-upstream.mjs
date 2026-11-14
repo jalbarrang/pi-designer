@@ -1,5 +1,9 @@
 /**
- * Vendors the Pi build of Impeccable from the upstream repo into this extension.
+ * Imports the Pi build of Impeccable from the upstream repo into this extension.
+ *
+ * The importer, not a maintenance loop: `skill/` is edited in place since the
+ * divergence, and running this replaces the tree wholesale. Use it to import a
+ * newer upstream version on purpose, and read the diff.
  *
  * Upstream (github.com/pbakaus/impeccable, mirrored at ~/fun/drekki/impeccable)
  * is a build system: `skill/SKILL.src.md` is the source and `bun run build:skills`

@@ -8,9 +8,10 @@
  *   tokens, then prose sections in a fixed order. Designer advertises it to the
  *   agent and checks it against that spec, so the design system stays the single
  *   source of truth for UI work.
- * - Impeccable guidance. `skill/` is a vendored copy of upstream's Pi build
- *   (github.com/pbakaus/impeccable, mirrored locally). `bun scripts/sync-upstream.mjs`
- *   refreshes it; `skill/UPSTREAM.json` records the commit and versions it came from.
+ * - Impeccable guidance. `skill/` began as a snapshot of upstream's Pi build
+ *   (github.com/pbakaus/impeccable) and is edited here from that commit on;
+ *   `skill/UPSTREAM.json` records where it started. `bun scripts/sync-upstream.mjs`
+ *   is the importer that produced it, not a maintenance loop.
  *
  * Audits are manual, like running a linter. No tool hooks are registered: nothing
  * scans an edit, blocks a write, or pushes findings into a turn. Design review
@@ -200,7 +201,7 @@ export default function designer(pi: ExtensionAPI) {
 			if (playbooks.has(subcommand)) {
 				if (!hasSkill) {
 					ctx.ui.notify(
-						`designer: the Impeccable skill is missing. Run \`bun scripts/sync-upstream.mjs\` in ${HERE}`,
+						`designer: the Impeccable skill is missing from ${HERE}. Reinstall the package; the skill ships with it.`,
 						"warning",
 					);
 					return;

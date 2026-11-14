@@ -51,10 +51,10 @@ not enough: with only that, 1 of 3 audit runs loaded it and the other two improv
 file and screenshots; with the section it is 3 of 3 (see `evals/`). Audits in projects without a design file
 take the same route — the section is independent of `design_context`.
 
-**Carries Impeccable.** `skill/` is a vendored copy of upstream's Pi build
-([pbakaus/impeccable](https://github.com/pbakaus/impeccable)). It registers as a normal pi skill, so the agent
-loads its routing, references, and playbooks on demand, and `/designer <playbook>` forces one.
-`skill/UPSTREAM.json` records the commit and versions it came from.
+**Carries Impeccable.** `skill/` is a snapshot of Impeccable's Pi build
+([pbakaus/impeccable](https://github.com/pbakaus/impeccable)) imported at the commit in `skill/UPSTREAM.json`
+and edited in this repo since. It registers as a normal pi skill, so the agent loads its routing, references,
+and playbooks on demand, and `/designer <playbook>` forces one.
 
 ## Commands
 
@@ -115,35 +115,41 @@ closest file wins. Names checked in order: `DESIGN.md`, `DESIGN.MD`, `design.md`
 
 ## Maintainers
 
-### Refreshing the vendored skill
+### The skill
+
+`extensions/designer/skill/` is ours. It started as a snapshot of Impeccable's Pi build (skill `4.5.0`,
+engine `0.1.11`) at the commit in `skill/UPSTREAM.json`, and it is edited in place from here — no re-sync in
+the maintenance loop.
+
+That manifest is provenance, not wiring: it says which commit the tree started from, nothing reads it at
+runtime, and it stays as the record of where the divergence began.
+
+`sync-upstream.mjs` remains as the importer that produced that snapshot. It replaces the tree wholesale, so
+running it again discards local guidance; use it only to import a newer upstream version on purpose, and read
+the diff first:
 
 ```bash
 bun extensions/designer/scripts/sync-upstream.mjs --source <path-to-impeccable>
-bun extensions/designer/scripts/sync-upstream.mjs --dry-run
+bun extensions/designer/scripts/sync-upstream.mjs --source <path-to-impeccable> --dry-run
 ```
 
-`--source` is required, or set `IMPECCABLE_UPSTREAM`: there is no checkout to guess.
+`--source` is required, or set `IMPECCABLE_UPSTREAM`. Pull and rebuild the source first
+(`git pull && bun run build:skills`): the script copies the generated `.pi/skills/impeccable` tree, rewrites the
+scripts path upstream bakes into its guidance (`.pi/skills/impeccable/scripts`) to `<skill-base-dir>/scripts`
+— the placeholder `SKILL.md` already defines, resolved by the runtime — and records the upstream repo URL,
+commit, and versions in `skill/UPSTREAM.json`. It fails loudly if upstream changes its path shape rather than
+leaving instructions that point at a missing directory.
 
-Pull and rebuild upstream first (`git pull && bun run build:skills`). The script copies the generated
-`.pi/skills/impeccable` tree and rewrites the scripts path upstream bakes into its guidance
-(`.pi/skills/impeccable/scripts`) to `<skill-base-dir>/scripts` — the placeholder `SKILL.md` already defines,
-resolved by the runtime rather than frozen to one machine's home directory. It records the upstream repo URL,
-commit, skill version, and engine version in `skill/UPSTREAM.json`, and fails loudly if upstream changes its
-path shape rather than leaving instructions that point at a missing directory.
-
-That manifest is provenance, not wiring: it says which upstream commit this tree started from, and nothing
-reads it at runtime. Once the vendored guidance is edited in place instead of re-synced, it is the record of
-the fork point.
-
-`extensions/designer/skill/` is generated. Do not hand-edit it; fixes belong upstream.
+The skill's text is Apache-2.0, not MIT: attribution and license text live in `NOTICE` and
+`THIRD_PARTY_LICENSES/`, and stay accurate as the tree changes.
 
 ### Layout
 
 - `extensions/designer/index.ts` — factory: prompt sections, `/designer` command, error notification
 - `extensions/designer/spec.ts` — spec reading, summary extraction, and validation
 - `extensions/designer/design-file.ts` — `DESIGN.md` discovery
-- `extensions/designer/scripts/sync-upstream.mjs` — vendors and rewrites the upstream Pi build
-- `extensions/designer/skill/` — vendored Impeccable (generated; provenance in `skill/UPSTREAM.json`)
+- `extensions/designer/scripts/sync-upstream.mjs` — imported the Pi build once; provenance in `skill/UPSTREAM.json`
+- `extensions/designer/skill/` — the Impeccable-derived skill, edited in place
 - `test/spec.ts` — spec reading, validation, and command wiring
 - `evals/` — behavioral evals: does an agent use these surfaces correctly? See `evals/README.md`
 

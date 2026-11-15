@@ -15,6 +15,7 @@ import {
 	loadState,
 	newState,
 	nextInstruction,
+	readBuildStatus,
 	renderStatus,
 	saveState,
 	STATE_PATH,
@@ -59,11 +60,11 @@ function runBuildPhase({ args, cwd = process.cwd() }: { readonly args: readonly 
 		if (!comp && !direction) return { text: "usage: build-phase start --comp <png> | --direction <seed key>", failed: true };
 		if (comp && !fs.existsSync(path.resolve(cwd, comp))) return { text: `comp ${comp} does not exist`, failed: true };
 
-		const existing = loadState(statePath);
-		if (existing && !flags.has("reset")) {
+		const existing = readBuildStatus(cwd);
+		if (existing.kind === "started" && !flags.has("reset")) {
 			// Starting over a live state would erase the attempt history a gate reads, so it is refused
 			// rather than assumed.
-			return { text: `state exists (phase ${existing.phase}); pass --reset to start over\n${renderStatus(existing)}`, failed: true };
+			return { text: `state exists (phase ${existing.state.phase}); pass --reset to start over\n${renderStatus(existing.state)}`, failed: true };
 		}
 
 		let breakpoint = flags.value("breakpoint");

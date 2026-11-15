@@ -19,7 +19,7 @@ import { createImage, blit, resize, type Image } from "./raster.ts";
 import { decodePng, encodePng, loadRaster } from "./png.ts";
 import { compare } from "./comp-diff.ts";
 import { plateReference, type CompSpec, type SpecRegion } from "./comp-spec.ts";
-import { plateVerdict } from "./build-phase.ts";
+import { plateVerdict, readBuildStatus } from "./build-phase.ts";
 
 /** FNV-1a 32-bit: tiny, dependency-free, and stable across runs and platforms. */
 function hash32(str: string): number {
@@ -419,9 +419,7 @@ function fakeComp(prompt: string, out: string, size: string | null = null): { ou
  */
 function mockOutputAllowed({ out, cwd = process.cwd(), force = false }: { readonly out: string; readonly cwd?: string; readonly force?: boolean }): { ok: boolean; reason?: string } {
 	const intoMocks = /(^|[\\/])\.impeccable[\\/]mocks[\\/]/.test(out) && !/[\\/]decision[\\/]/.test(out);
-	const pending = fs.existsSync(path.join(cwd, ".impeccable", "build", "pending.json"));
-	const state = fs.existsSync(path.join(cwd, ".impeccable", "build", "state.json"));
-	if (intoMocks && pending && !state && !force) {
+	if (intoMocks && !force && readBuildStatus(cwd).kind === "dealt") {
 		return {
 			ok: false,
 			reason: "a direction was chosen but build-phase start has not run, so this comp would be generated outside the build's state. Run build-phase start --direction <seed key> --kind <assigned|pick|challenger|canon> first (it opens the comps phase), then generate. --force-mock overrides.",

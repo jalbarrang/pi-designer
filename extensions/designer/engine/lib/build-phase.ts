@@ -25,7 +25,35 @@ import { scanCssTextForOrganicClipPath } from "../core/checks/html-patterns.ts";
 const STATE_PATH = path.join(BUILD_DIR, "state.json");
 
 /** The phases, in order. `sections` and `motion` have no mechanical gate. */
-const PHASES: readonly string[] = ["comps", "spec", "plates", "hero", "sections", "motion", "responsive", "review"];
+const PHASES = ["comps", "spec", "plates", "hero", "sections", "motion", "responsive", "review"] as const;
+
+/** A phase's name. Derived from the order above, so the two cannot disagree. */
+type Phase = (typeof PHASES)[number];
+
+/**
+ * A phase's status. These four are the whole machine: as a bare `string`, a status the gates never
+ * write was free to appear, and every reader had to guess what it meant.
+ */
+type PhaseStatus = "pending" | "open" | "closed" | "skipped";
+
+/** How a build ends, when it does. */
+const DISPOSITIONS = ["ship", "fix", "rebuild", "recapture"] as const;
+type Disposition = (typeof DISPOSITIONS)[number];
+
+/** A plate's verdict from the plates gate, carried on the state so the hero can tell placed from missing. */
+type PlateStatus = "ok" | "missing" | "unreadable";
+
+/** The recorded end of a build: which disposition, when, and where the machine stood. */
+interface FinishRecord {
+	disposition: Disposition;
+	at: string;
+	phaseAtFinish?: Phase;
+}
+
+/** Whether a value is a disposition this machine knows. */
+function isDisposition(value: string | null | undefined): value is Disposition {
+	return typeof value === "string" && (DISPOSITIONS as readonly string[]).includes(value);
+}
 
 const MOCKS_DIR = path.join(".impeccable", "mocks");
 const HERO_MIN = 0.72;
@@ -47,7 +75,7 @@ interface GateResult {
 	summary?: string;
 	advisories?: string[];
 	approved?: string | null;
-	plates?: Array<{ id: string; file?: string | null; status: string; size?: string; score?: number | null }>;
+	plates?: Array<{ id: string; file?: string | null; status: PlateStatus; size?: string; score?: number | null }>;
 	score?: number;
 	verdict?: string;
 	worst?: string[];
@@ -61,7 +89,7 @@ interface GateResult {
 
 /** One phase's record. */
 interface PhaseState {
-	status: string;
+	status: PhaseStatus;
 	openedAt: string | null;
 	closedAt: string | null;
 	attempts: number;
@@ -82,10 +110,10 @@ interface BuildState {
 	direction: string | null;
 	breakpoint: string | null;
 	artifact: string | null;
-	phase: string;
-	phases: Record<string, PhaseState>;
-	plates?: Record<string, { status: string; score?: number | null; size?: string }>;
-	finish: { disposition: string; at: string; phaseAtFinish?: string } | null;
+	phase: Phase;
+	phases: Record<Phase, PhaseState>;
+	plates?: Record<string, { status: PlateStatus; score?: number | null; size?: string }>;
+	finish: FinishRecord | null;
 }
 
 /** The recorded build path, or null. */
@@ -103,34 +131,62 @@ function readBuildPath(cwd: string = process.cwd()): string | null {
 }
 
 /**
+ * What the build files say, read once.
+ *
+ * The lifecycle is three files' worth of existence checks: no direction dealt, a direction dealt that
+ * never started, or a build with a state file. Three callers used to re-derive it independently
+ * (`compRoundOpen`, the image generator's mock guard, and `build-phase start`), which is three places
+ * to get the same answer differently. This is the one reading.
+ */
+type BuildStatus =
+	| { readonly kind: "unstarted" }
+	| { readonly kind: "dealt"; readonly statePath: string; readonly pendingPath: string }
+	| { readonly kind: "started"; readonly statePath: string; readonly state: BuildState };
+
+/**
+ * Read the build's status from disk.
+ *
+ * The `as BuildState` is the trust boundary: a state file this process did not write is assumed to
+ * have the shape it wrote. An unreadable one reads as unstarted, because guessing a phase from a
+ * half-written file is worse than saying nothing.
+ */
+function readBuildStatus(cwd: string = process.cwd()): BuildStatus {
+	const statePath = path.join(cwd, STATE_PATH);
+	if (fs.existsSync(statePath)) {
+		try {
+			return { kind: "started", statePath, state: JSON.parse(fs.readFileSync(statePath, "utf8")) as BuildState };
+		} catch {
+			return { kind: "unstarted" };
+		}
+	}
+
+	const pendingPath = path.join(cwd, BUILD_DIR, "pending.json");
+	if (fs.existsSync(pendingPath)) return { kind: "dealt", statePath, pendingPath };
+	return { kind: "unstarted" };
+}
+
+/**
  * Whether a direction was dealt and the build never started, or started and stopped before the hero
  * gate: the condition a boot report and the detector call `COMP_ROUND_OPEN` when page code exists.
  */
 function compRoundOpen(cwd: string = process.cwd()): { reason: string; pending?: string; state?: string } | null {
-	const buildPath = readBuildPath(cwd);
-	if (buildPath === "code") return null;
+	// A code-first project has no comp round to be open.
+	if (readBuildPath(cwd) === "code") return null;
 
-	const pending = path.join(cwd, BUILD_DIR, "pending.json");
-	const statePath = path.join(cwd, STATE_PATH);
-	if (fs.existsSync(pending) && !fs.existsSync(statePath)) {
-		return { reason: "a direction was chosen (concept-seed rolled) but build-phase start never ran", pending };
+	const status = readBuildStatus(cwd);
+	if (status.kind === "dealt") {
+		return { reason: "a direction was chosen (concept-seed rolled) but build-phase start never ran", pending: status.pendingPath };
 	}
+	if (status.kind !== "started") return null;
 
-	if (fs.existsSync(statePath)) {
-		try {
-			const st = JSON.parse(fs.readFileSync(statePath, "utf8")) as BuildState;
-			const idx = PHASES.indexOf(st.phase);
-			if (idx !== -1 && idx <= PHASES.indexOf("hero") && st.phases?.comps?.status !== "skipped" && st.phases?.comps?.status !== "closed") {
-				return { reason: `build-phase is at ${st.phase}; the comps phase never closed`, state: statePath };
-			}
-			if (idx !== -1 && idx <= PHASES.indexOf("hero")) {
-				return { reason: `build-phase is at ${st.phase}; the hero gate has not passed`, state: statePath };
-			}
-		} catch {
-			// Unreadable: say nothing.
-		}
+	const { state } = status;
+	const idx = PHASES.indexOf(state.phase);
+	if (idx === -1 || idx > PHASES.indexOf("hero")) return null;
+
+	if (state.phases?.comps?.status !== "skipped" && state.phases?.comps?.status !== "closed") {
+		return { reason: `build-phase is at ${state.phase}; the comps phase never closed`, state: status.statePath };
 	}
-	return null;
+	return { reason: `build-phase is at ${state.phase}; the hero gate has not passed`, state: status.statePath };
 }
 
 function loadState(statePath: string = STATE_PATH): BuildState | null {
@@ -145,11 +201,21 @@ function saveState(state: BuildState, statePath: string = STATE_PATH): void {
 
 /** A fresh state: a comp already in hand skips the comp round. */
 function newState({ comp = null, breakpoint = null, artifact = null, direction = null }: { readonly comp?: string | null; readonly breakpoint?: string | null; readonly artifact?: string | null; readonly direction?: string | null } = {}): BuildState {
-	const first = comp ? "spec" : "comps";
-	const phases: Record<string, PhaseState> = {};
-	for (const p of PHASES) {
-		phases[p] = { status: p === first ? "open" : "pending", openedAt: p === first ? now() : null, closedAt: null, attempts: 0, notes: [], gate: null, forced: null };
-	}
+	const first: Phase = comp ? "spec" : "comps";
+	const phases = Object.fromEntries(
+		PHASES.map((p): [Phase, PhaseState] => [
+			p,
+			{
+				status: p === first ? "open" : "pending",
+				openedAt: p === first ? now() : null,
+				closedAt: null,
+				attempts: 0,
+				notes: [],
+				gate: null,
+				forced: null,
+			},
+		]),
+	) as Record<Phase, PhaseState>;
 	if (comp) {
 		phases.comps.status = "skipped";
 		phases.comps.notes.push({ at: now(), text: "started with an approved comp; the comp round happened before this state (surface round or manual)" });
@@ -1026,12 +1092,67 @@ function gateResponsive(
 	return { ok: reasons.length === 0, reasons, summary: `desktop ${(report.whole.overall * 100).toFixed(0)}% (${verdictFor(report.whole)})`, score: report.whole.overall, sideBySide: path.join(outDir, "side-by-side.png") };
 }
 
-const GATES: Readonly<Record<string, (state: BuildState, opts: Record<string, unknown>) => GateResult>> = {
+/**
+ * The transition table: every phase's gate, or `null` where there is none.
+ *
+ * Keyed by the phase union, so adding a phase is a compile error here until someone decides whether it
+ * gets a gate. `null` says "no mechanical gate" out loud instead of leaving the phase unmentioned.
+ */
+type Gate = (state: BuildState, opts: Record<string, unknown>) => GateResult;
+
+const GATES: Readonly<Record<Phase, Gate | null>> = {
 	comps: (state, opts) => gateComps(state, opts as { mocksDir?: string }),
 	spec: (state, opts) => gateSpec(state, opts as { specPath?: string }),
 	plates: (state, opts) => gatePlates(state, opts as { specPath?: string }),
 	hero: (state, opts) => gateHero(state, opts as Parameters<typeof gateHero>[1]),
+	sections: null,
+	motion: null,
 	responsive: (state, opts) => gateResponsive(state, opts as Parameters<typeof gateResponsive>[1]),
+	review: null,
+};
+
+/**
+ * Per-phase behaviour that is not a gate, in one table instead of `if (phase === ...)` chains.
+ *
+ * Three points, in the order they run: `onGate` on the gate's answer whether or not it passed,
+ * `beforeRefusal` once a forced refusal is not taking the run out, and `onClose` only when the phase
+ * actually closes.
+ */
+interface PhaseHook {
+	onGate?: (state: BuildState, gate: GateResult, opts: Record<string, unknown>) => void;
+	beforeRefusal?: (state: BuildState, gate: GateResult, opts: Record<string, unknown>) => void;
+	onClose?: (state: BuildState, gate: GateResult) => void;
+}
+
+const PHASE_HOOKS: Partial<Record<Phase, PhaseHook>> = {
+	comps: {
+		onClose: (state, gate) => {
+			if (!gate.approved) return;
+			state.comp = gate.approved;
+			if (state.breakpoint) return;
+			try {
+				const image = loadRaster(gate.approved).image;
+				state.breakpoint = `${image.width}x${image.height}`;
+			} catch {
+				// A non-PNG comp leaves the breakpoint unset.
+			}
+		},
+	},
+	plates: {
+		onGate: (state, gate) => {
+			// The plates gate's per-plate scores are what the hero reads to tell a placed plate from a
+			// missing one, so they travel on the state even when the gate refused.
+			if (!Array.isArray(gate.plates)) return;
+			state.plates = Object.fromEntries(gate.plates.map((pl) => [pl.id, { status: pl.status, score: pl.score, size: pl.size }]));
+		},
+	},
+	hero: {
+		beforeRefusal: (state, gate, opts) => {
+			if (gate.score == null) return;
+			const stuck = heroLoopVerdict(state, gate, (opts.artifact as string) || state.artifact || "index.html");
+			if (stuck && !gate.ok) gate.reasons = [stuck, ...(gate.reasons ?? [])];
+		},
+	},
 };
 
 /**
@@ -1041,7 +1162,7 @@ const GATES: Readonly<Record<string, (state: BuildState, opts: Record<string, un
  * that names itself, so a session sees one line and the state stays consistent instead of a stack
  * trace and a half-run.
  */
-function runGate(state: BuildState, phase: string, opts: Record<string, unknown> = {}): GateResult {
+function runGate(state: BuildState, phase: Phase, opts: Record<string, unknown> = {}): GateResult {
 	const gate = GATES[phase];
 	if (!gate) return { ok: true, reasons: [], summary: "no mechanical gate" };
 	try {
@@ -1089,23 +1210,19 @@ function forceAllowed(reason: unknown): boolean {
 }
 
 /** Close the current phase, or refuse and say why. */
-function advance(state: BuildState, { force = false, reason = null, gateOpts = {} }: { readonly force?: boolean; readonly reason?: string | null; readonly gateOpts?: Record<string, unknown> } = {}): { ok: boolean; phase?: string; next?: string; reasons?: string[]; gate?: GateResult; forced?: boolean } {
+function advance(state: BuildState, { force = false, reason = null, gateOpts = {} }: { readonly force?: boolean; readonly reason?: string | null; readonly gateOpts?: Record<string, unknown> } = {}): { ok: boolean; phase?: Phase; next?: Phase; reasons?: string[]; gate?: GateResult; forced?: boolean } {
 	const phase = state.phase;
 	const idx = PHASES.indexOf(phase);
 	if (idx === -1 || phase === "review") return { ok: false, reasons: [`phase ${phase} cannot advance; use finish`] };
 
+	const hooks = PHASE_HOOKS[phase];
 	const p = state.phases[phase];
 	p.attempts += 1;
 	const gate = runGate(state, phase, gateOpts);
 
 	const { plates: _plates, ...gateRecord } = gate;
 	p.gate = { ...gateRecord, at: now() };
-
-	// The plates gate's per-plate scores are what the hero reads to tell a placed plate from a missing
-	// one, so they travel on the state.
-	if (phase === "plates" && Array.isArray(gate.plates)) {
-		state.plates = Object.fromEntries(gate.plates.map((pl) => [pl.id, { status: pl.status, score: pl.score, size: pl.size }]));
-	}
+	hooks?.onGate?.(state, gate, gateOpts);
 
 	if (!gate.ok && force && !forceAllowed(reason)) {
 		p.status = "open";
@@ -1120,10 +1237,7 @@ function advance(state: BuildState, { force = false, reason = null, gateOpts = {
 		};
 	}
 
-	if (phase === "hero" && gate.score != null) {
-		const stuck = heroLoopVerdict(state, gate, (gateOpts.artifact as string) || state.artifact || "index.html");
-		if (stuck && !gate.ok) gate.reasons = [stuck, ...(gate.reasons ?? [])];
-	}
+	hooks?.beforeRefusal?.(state, gate, gateOpts);
 
 	if (!gate.ok && !force) {
 		p.status = "open";
@@ -1133,18 +1247,7 @@ function advance(state: BuildState, { force = false, reason = null, gateOpts = {
 
 	p.status = "closed";
 	p.closedAt = now();
-
-	if (phase === "comps" && gate.approved) {
-		state.comp = gate.approved;
-		if (!state.breakpoint) {
-			try {
-				const image = loadRaster(gate.approved).image;
-				state.breakpoint = `${image.width}x${image.height}`;
-			} catch {
-				// A non-PNG comp leaves the breakpoint unset.
-			}
-		}
-	}
+	hooks?.onClose?.(state, gate);
 
 	const next = PHASES[idx + 1];
 	state.phase = next;
@@ -1153,28 +1256,33 @@ function advance(state: BuildState, { force = false, reason = null, gateOpts = {
 	return { ok: true, phase, next, gate, forced: !!p.forced };
 }
 
-/** What to do next, in the words a session acts on. */
+/**
+ * What to do next, in the words a session acts on.
+ *
+ * A table keyed by the phase union, not a switch: a new phase is a compile error here until it has an
+ * instruction, and no phase can hide behind a `default`.
+ */
+const NEXT_INSTRUCTIONS: Readonly<Record<Phase, (state: BuildState) => string>> = {
+	comps: (state) =>
+		`Comp round for the chosen direction${state.direction ? ` (seed ${state.direction})` : ""}: read reference/visualize.md, generate three compositional comps of the requested surface at its own viewport into ${MOCKS_DIR}/ (each with a prompt sidecar), put them in front of the user, and set "approved": true in the chosen comp's sidecar. Then build-phase advance. No page code before this closes.`,
+	spec: (state) =>
+		`Measure the comp: comp-spec --comp ${state.comp} --grid, open ${path.join(BUILD_DIR, "comp-grid.png")}, write regions.json (every illustration, photo, texture as its own plate region; every text block its own text region), run comp-spec --comp ${state.comp} --regions regions.json. Then measure the type: font-match --measure <id> for each text region (cap height, width class, weight class) and font-match --rank <lead text region> --text "<its first words>" to choose the headline face by metrics (the USE line is the CSS; with no browser it records the catalog's nearest face, which is the choice; do not install one, and do not write a chosen face into the spec by hand). Then build-phase advance.`,
+	plates: () =>
+		"Produce every plate in the spec (comp-spec --print lists them). Illustrations, photos, figures: generate-image --plate <id>, one call per plate. It crops the comp region itself, sends the crop as the edit reference, sizes the plate, keys ink-on-ground to alpha, scores the result against the crop (PLATE-SCORE) and embeds the prompt; nothing else does all of that. Only when it errors (no key, no network) fall back to the harness image tool with comp-spec --crop <id> as its reference image and comp-spec --plate-prompt <id> as its prompt, then embed-prompt; do not post-process a plate with magick or write your own keying. A generation takes 30 to 90 seconds: run it with a long wait (a 90 s yield, or all plates in one command joined with &&) rather than polling an open session turn after turn. A line drawing or figure on flat ground is keyed to alpha automatically (PLATE-CHROMA): place it with a plain <img> over the page's own ground, never on a second paper. An opaque plate whose ground differs from the page goes in with mix-blend-mode: multiply. Textures (paper, cloth, grain): do not generate first; crop a clean patch of the comp region (comp-spec --crop <id> --raw, then cut a patch free of ink), mirror-tile it to the plate size, and save it as the plate; generate only when no clean patch exists. The gate scores a texture against its whole region box, so a texture region should be drawn around clean ground (a sample cell), not around the ink it sits under; the page tiles it wherever the material goes. Then build-phase advance. Write no page code before this passes.",
+	hero: (state) =>
+		`Run build-phase scaffold first: it writes the measured layout as CSS custom properties (.impeccable/build/scaffold/layout.css, --r-<id>-x/y/w/h in % of the comp, plus cap height, font-size, family, and weight where measured) and a reference page with every region at its box. Bind those numbers to your own markup (an element per region, its box from the properties); the reference is a check, not the page, and overlapping boxes are overlapping boxes. Build only the first viewport at ${state.breakpoint || "the comp size"}. Copy the comp's words verbatim in this phase (headline, labels, table cells, footer): the user approved that comp with those words, and rewriting is a later, stated decision, never a silent one here. Set every text region's font-size from its measured cap height and its face from the ranking. Plates first: place every plate at its spec box (comp-spec --print lists boxes as percentages of the viewport) with object-fit: cover before writing a line of text or a control, capture into ${HERO_REPRO}, and run build-phase record hero (not advance) once so you see the plate regions read as match before text exists; then lay the semantic layer (text, controls, rules) over the plates from the spec's palette and boxes, capture, advance. When it fails, open the region crops it lists first, in order, then fix; do not build past the hero until it passes.`,
+	sections: () =>
+		"Build the remaining sections inside the spec system (same corner language, rules, and palette; nothing the comp does not show). The hero passed with the comp's words verbatim; from here, content beyond the comp is yours to author at full fidelity, and any change to words the comp showed is a stated decision in your report, never silent. Then build-phase advance.",
+	motion: () => "Add the signature interaction, reveals, and motion. Then build-phase advance.",
+	responsive: () =>
+		"Build the other viewports (mobile first if the surface is mobile). The first viewport must hold at common desktop widths (1280 to 1600), not only at the comp's exact size: fluid columns, no fixed-px grid that wraps 96px narrower. Settle or disable entrance motion before capturing (an element mid-animation reads as missing). Capture desktop.png (1440 wide, full page) and mobile.png (390 wide, full page) into .impeccable/review/; the gate diffs the top of desktop.png (scaled to the comp's width) against the comp. Then build-phase advance.",
+	review: () => "Spawn the finish reviewer with the state file, the hero diff report, and the captures; record its disposition with build-phase finish --disposition <word>.",
+};
+
 function nextInstruction(state: BuildState): string {
-	switch (state.phase) {
-		case "comps":
-			return `Comp round for the chosen direction${state.direction ? ` (seed ${state.direction})` : ""}: read reference/visualize.md, generate three compositional comps of the requested surface at its own viewport into ${MOCKS_DIR}/ (each with a prompt sidecar), put them in front of the user, and set "approved": true in the chosen comp's sidecar. Then build-phase advance. No page code before this closes.`;
-		case "spec":
-			return `Measure the comp: comp-spec --comp ${state.comp} --grid, open ${path.join(BUILD_DIR, "comp-grid.png")}, write regions.json (every illustration, photo, texture as its own plate region; every text block its own text region), run comp-spec --comp ${state.comp} --regions regions.json. Then measure the type: font-match --measure <id> for each text region (cap height, width class, weight class) and font-match --rank <lead text region> --text "<its first words>" to choose the headline face by metrics (the USE line is the CSS; with no browser it records the catalog's nearest face, which is the choice; do not install one, and do not write a chosen face into the spec by hand). Then build-phase advance.`;
-		case "plates":
-			return "Produce every plate in the spec (comp-spec --print lists them). Illustrations, photos, figures: generate-image --plate <id>, one call per plate. It crops the comp region itself, sends the crop as the edit reference, sizes the plate, keys ink-on-ground to alpha, scores the result against the crop (PLATE-SCORE) and embeds the prompt; nothing else does all of that. Only when it errors (no key, no network) fall back to the harness image tool with comp-spec --crop <id> as its reference image and comp-spec --plate-prompt <id> as its prompt, then embed-prompt; do not post-process a plate with magick or write your own keying. A generation takes 30 to 90 seconds: run it with a long wait (a 90 s yield, or all plates in one command joined with &&) rather than polling an open session turn after turn. A line drawing or figure on flat ground is keyed to alpha automatically (PLATE-CHROMA): place it with a plain <img> over the page's own ground, never on a second paper. An opaque plate whose ground differs from the page goes in with mix-blend-mode: multiply. Textures (paper, cloth, grain): do not generate first; crop a clean patch of the comp region (comp-spec --crop <id> --raw, then cut a patch free of ink), mirror-tile it to the plate size, and save it as the plate; generate only when no clean patch exists. The gate scores a texture against its whole region box, so a texture region should be drawn around clean ground (a sample cell), not around the ink it sits under; the page tiles it wherever the material goes. Then build-phase advance. Write no page code before this passes.";
-		case "hero":
-			return `Run build-phase scaffold first: it writes the measured layout as CSS custom properties (.impeccable/build/scaffold/layout.css, --r-<id>-x/y/w/h in % of the comp, plus cap height, font-size, family, and weight where measured) and a reference page with every region at its box. Bind those numbers to your own markup (an element per region, its box from the properties); the reference is a check, not the page, and overlapping boxes are overlapping boxes. Build only the first viewport at ${state.breakpoint || "the comp size"}. Copy the comp's words verbatim in this phase (headline, labels, table cells, footer): the user approved that comp with those words, and rewriting is a later, stated decision, never a silent one here. Set every text region's font-size from its measured cap height and its face from the ranking. Plates first: place every plate at its spec box (comp-spec --print lists boxes as percentages of the viewport) with object-fit: cover before writing a line of text or a control, capture into ${HERO_REPRO}, and run build-phase record hero (not advance) once so you see the plate regions read as match before text exists; then lay the semantic layer (text, controls, rules) over the plates from the spec's palette and boxes, capture, advance. When it fails, open the region crops it lists first, in order, then fix; do not build past the hero until it passes.`;
-		case "sections":
-			return "Build the remaining sections inside the spec system (same corner language, rules, and palette; nothing the comp does not show). The hero passed with the comp's words verbatim; from here, content beyond the comp is yours to author at full fidelity, and any change to words the comp showed is a stated decision in your report, never silent. Then build-phase advance.";
-		case "motion":
-			return "Add the signature interaction, reveals, and motion. Then build-phase advance.";
-		case "responsive":
-			return "Build the other viewports (mobile first if the surface is mobile). The first viewport must hold at common desktop widths (1280 to 1600), not only at the comp's exact size: fluid columns, no fixed-px grid that wraps 96px narrower. Settle or disable entrance motion before capturing (an element mid-animation reads as missing). Capture desktop.png (1440 wide, full page) and mobile.png (390 wide, full page) into .impeccable/review/; the gate diffs the top of desktop.png (scaled to the comp's width) against the comp. Then build-phase advance.";
-		case "review":
-			return "Spawn the finish reviewer with the state file, the hero diff report, and the captures; record its disposition with build-phase finish --disposition <word>.";
-		default:
-			return "";
-	}
+	// A phase the union does not have is a hand-edited state file: the reference gives it no
+	// instruction, and neither does this.
+	return NEXT_INSTRUCTIONS[state.phase]?.(state) ?? "";
 }
 
 /** The status block a session reads. */
@@ -1208,7 +1316,7 @@ function shipAllowed(state: BuildState): { ok: boolean; open: string[] } {
 
 /** Record a finish disposition, refusing a ship over an open phase. */
 function finish(state: BuildState, disposition: string): { ok: boolean; error?: string; state: BuildState } {
-	if (!["ship", "fix", "rebuild", "recapture"].includes(disposition)) return { ok: false, error: "build-phase: finish --disposition ship|fix|rebuild|recapture", state };
+	if (!isDisposition(disposition)) return { ok: false, error: `build-phase: finish --disposition ${DISPOSITIONS.join("|")}`, state };
 
 	const check = shipAllowed(state);
 	if (disposition === "ship" && !check.ok) {
@@ -1253,6 +1361,7 @@ export {
 	PLATE_MIN,
 	PLATE_STRUCTURE_MIN,
 	readBuildPath,
+	readBuildStatus,
 	renderStatus,
 	RESPONSIVE_MIN,
 	runGate,
@@ -1263,4 +1372,4 @@ export {
 	unreferencedPlates,
 	writeScaffold,
 };
-export type { BuildState, DiffIo, GateResult, PhaseState, TypedRegion };
+export type { BuildState, BuildStatus, DiffIo, Disposition, FinishRecord, GateResult, Phase, PhaseState, PhaseStatus, PlateStatus, TypedRegion };

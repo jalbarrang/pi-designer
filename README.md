@@ -179,20 +179,23 @@ The skill's text is Apache-2.0, not MIT: attribution and license text live in `N
 - `extensions/designer/index.ts` — factory: prompt sections, `/designer` command, error notification
 - `extensions/designer/spec.ts` — spec reading, summary extraction, and validation
 - `extensions/designer/design-file.ts` — `DESIGN.md` discovery
-- `extensions/designer/engine/` — the TypeScript port of Impeccable's engine, so pi commands call the rule logic in process instead of spawning the binary. Currently the core spine: the rule catalog, finding construction, inline ignores, and shared helpers. The rule checks and the detect engines land here next.
+- `extensions/designer/engine/` — the TypeScript port of Impeccable's engine, so pi commands call the rule logic in process instead of spawning a binary. Covers the rule catalog and checks, the detect engines, and the build/comp/font/image helpers; the JavaScript it was ported from is no longer in the repo.
 - `extensions/designer/scripts/sync-upstream.mjs` — imported the Pi build once; provenance in `skill/UPSTREAM.json`
 - `extensions/designer/skill/` — the Impeccable-derived skill, edited in place
-- `reference/impeccable-js/` — the pre-Rust JavaScript engine, unmodified, as the source the TypeScript port diffs against. `PORTING.md` maps every file to its port and its status; nothing here is published or imported.
-- `test/spec.ts` — spec reading, validation, and command wiring
-- `test/engine.ts` — the ported engine's catalog, findings, ignores, and helpers
+- `test/` — vitest suite, one folder per domain, each file mirroring the module it covers:
+  - `test/core/` — rule catalog, findings, checks, color, config, context, doctor, critique storage
+  - `test/detect/` — the HTML, CSS, text, URL, and visual detection engines
+  - `test/lib/` — the command and workflow helpers (build phase, comps, fonts, images, staleness)
+  - `test/extension/` — the surfaces pi calls: `/designer` routing, the engine facade
+  - `test/helpers/check.ts` — one vitest case per comparison
 - `evals/` — behavioral evals: does an agent use these surfaces correctly? See `evals/README.md`
 
 ### Development
 
 ```bash
 bun install
-bun run typecheck        # tsc --noEmit
-bun run test             # spec reading, validation, command wiring
+bun run typecheck        # tsc --noEmit, tests included
+bun run test             # vitest run: behavior and contract checks
 bun run eval:test        # assertion grading, no model calls
 bun run eval             # behavioral evals (model calls); see evals/README.md
 ```

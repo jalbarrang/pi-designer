@@ -12,5 +12,5 @@
     "allowImportingTsExtensions": true,
     "types": ["bun-types", "node"]
   },
-  "include": ["extensions/**/*.ts", "test/**/*.ts", "evals/*.ts", "evals/lib/**/*.ts"]
+  "include": ["extensions/**/*.ts", "test/**/*.ts", "evals/*.ts", "evals/lib/**/*.ts", "vitest.config.ts"]
 }

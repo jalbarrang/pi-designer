@@ -5,13 +5,14 @@ Behavioral evals for designer's agent-facing surface: does an agent **read the
 for an audit, **run `detect`** instead of describing what a linter might say,
 and **never assume an automatic hook** is watching?
 
-This is not the unit-test suite. `bun test/spec.ts` covers the deterministic
-code (spec reading, validation, command wiring) with no model in the loop.
+This is not the unit-test suite. `bun run test` covers the deterministic
+code (spec reading, validation, command wiring, and the engine's own
+contracts) with no model in the loop.
 Evals cover the part that only exists once a model is in the loop.
 
 ```
-bun test/spec.ts        → did we break the code?
-bun evals/run-evals.ts  → did we break the agent's behavior?
+bun run test           → did we break the code?
+bun evals/run-evals.ts → did we break the agent's behavior?
 ```
 
 Designer registers no tool hooks and exposes no tools. Its surface is three

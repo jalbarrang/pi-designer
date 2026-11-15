@@ -16,7 +16,7 @@
  * Audits are manual, like running a linter. No tool hooks are registered: nothing
  * scans an edit, blocks a write, or pushes findings into a turn. Design review
  * happens when it is asked for — `/designer <playbook>` routes to Impeccable, and
- * `impeccable detect <paths>` runs the detector from a shell.
+ * `/designer detect <paths>` runs the detector here, in process.
  *
  * Ownership rules:
  * - The design file is advertised, never inlined, the way skills load, so its
@@ -41,6 +41,9 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { findDesignFile } from "./design-file.ts";
 import { analyzeDesign, type DesignAnalysis, formatFindings, summarize } from "./spec.ts";
+import { runScan } from "./engine/lib/scan-command.ts";
+import { runDoctor } from "./engine/doctor.ts";
+import { ENGINE_VERBS } from "./engine/lib/engine-verbs.ts";
 
 /** Fixed tag: pi diffs prompt sections by name, so it must not vary per project. */
 const SECTION_NAME = "design_context";
@@ -63,7 +66,16 @@ const WORKFLOW_SECTION =
 	`When the user asks for a design review, critique, audit, or polish, read ${SKILL_FILE} and follow its playbook before answering. It carries the rule catalog and the review procedure; do not improvise a review from the design file alone.`;
 const COMMAND_METADATA = path.join(SKILL_DIR, "scripts", "command-metadata.json");
 /** Designer's own verbs, which are not Impeccable playbooks. */
-const OWN_VERBS = ["status", "validate"] as const;
+const OWN_VERBS = ["status", "validate", "detect", "doctor", "context", "palette", "concept-seed", "critique-storage", "surface-brief", "build-phase", "comp-spec", "font-match", "comp-diff"] as const;
+/**
+ * Skill verbs the vendored command metadata does not list, for completion only: both are owned
+ * above, so the routing table does not need them. `hooks` is deliberately absent everywhere — it
+ * installs detector hooks into other harnesses' manifests (`.claude/`, `.cursor/`, a committed
+ * `.github/`) and pi is not one of them.
+ */
+const EXTRA_VERBS: ReadonlyMap<string, string> = new Map([
+	["doctor", "Report and repair drift in this project's Impeccable artifacts"],
+]);
 
 interface Resolved {
 	path: string;
@@ -97,7 +109,7 @@ function buildSection(resolved: Resolved): string {
 
 /** Impeccable playbook names from the vendored command metadata, for completion and routing. */
 function loadPlaybooks(): Map<string, string> {
-	const playbooks = new Map<string, string>();
+	const playbooks = new Map<string, string>(EXTRA_VERBS);
 	if (!fs.existsSync(COMMAND_METADATA)) return playbooks;
 
 	try {
@@ -195,6 +207,52 @@ export default function designer(pi: ExtensionAPI) {
 
 			if (subcommand === "validate") {
 				reportSpec(ctx, requested);
+				return;
+			}
+
+			if (subcommand === "detect") {
+				// The detector runs here, in this process: the engine is TypeScript in this package, so the
+				// command has no binary to find, no child to wait on, and no report to parse back out of stdout.
+				const tokens = requested.split(/\s+/).filter(Boolean);
+				const flags = new Set(tokens.filter((token) => token.startsWith("--")));
+				const targets = tokens.filter((token) => !token.startsWith("--"));
+				const scopes = [flags.has("--scope=type") || flags.has("--type") ? "type" : null, flags.has("--scope=layout") || flags.has("--layout") ? "layout" : null].filter((scope): scope is "type" | "layout" => scope !== null);
+
+				const run = await runScan({ targets, cwd: ctx.cwd, json: flags.has("--json"), scopes });
+				for (const warning of run.warnings) ctx.ui.notify(`designer detect: ${warning}`, "warning");
+				if (run.degraded) {
+					ctx.ui.notify(
+						"designer detect: the HTML parser is not installed, so markup was scanned as text. Install htmlparser2, css-select, css-tree and domutils for the full pass.",
+						"warning",
+					);
+				}
+				ctx.ui.notify(run.text, run.findings > 0 ? "warning" : "info");
+				if (run.notice) ctx.ui.notify(run.notice, "warning");
+				return;
+			}
+
+			if (subcommand === "doctor") {
+				// The deep pass runs here too, for the same reason as the detector: the report is this
+				// package's own code, so there is nothing to shell out to and nothing to parse back.
+				// `--fix` applies only the migrations that carry no decision, and says what it moved.
+				const tokens = requested.split(/\s+/).filter(Boolean);
+				try {
+					const text = runDoctor({ cwd: ctx.cwd, args: tokens, json: tokens.includes("--json") });
+					// A report is not a failure: findings are what the user reads, so the notification stays
+					// informational unless the pass itself refused.
+					ctx.ui.notify(text, "info");
+				} catch (error) {
+					ctx.ui.notify(`designer doctor: ${(error as Error).message}`, "warning");
+				}
+				return;
+			}
+
+			// The rest of the engine's verbs, by table: each one is a ported module, called here with no
+			// process boundary between the command and the logic.
+			const engineVerb = ENGINE_VERBS.get(subcommand);
+			if (engineVerb) {
+				const run = await engineVerb(requested.split(/\s+/).filter(Boolean), ctx.cwd);
+				ctx.ui.notify(run.text, run.failed ? "warning" : "info");
 				return;
 			}
 

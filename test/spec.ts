@@ -380,6 +380,16 @@ for (const missing of ["document", "audit"]) {
 	check(`command: ${missing} is a known playbook`, sentMessages.length === 1, notes.join(" | "));
 }
 
+// The detector and the doctor run in this process, so they notify instead of routing: a command that
+// still sent a message would mean the engine was not wired, which is the failure this guards.
+for (const own of ["detect", "doctor"]) {
+	sentMessages.length = 0;
+	notes.length = 0;
+	await command!.handler(own, { cwd: deep, hasUI: true, ui: { notify } });
+	check(`command: ${own} runs here rather than routing`, sentMessages.length === 0, sentMessages.join(" | "));
+	check(`command: ${own} reports through a notification`, notes.length > 0, "no notification");
+}
+
 rmSync(base, { recursive: true, force: true });
 
 // --- a real project file, when this machine has one ------------------------

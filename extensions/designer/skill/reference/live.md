@@ -1,31 +1,31 @@
+> **Not available in this build.** pi has no live mode: the launcher that ran `live` and its helpers is no longer vendored, and nothing here is registered as a command. Live editing needs a browser surface pi does not own — use pi's browse tools against the running page, edit the source directly, then `/designer detect` and `/designer critique` on the result. Everything below is upstream's procedure, kept as reference for what live mode did.
+
 Interactive live variant mode: select elements in the browser, pick a design action, and get AI-generated HTML+CSS variants hot-swapped via the dev server's HMR.
 
 ## Prerequisites
 
 A running dev server with HMR (Vite, Next.js, Bun, etc.), OR a static HTML file open in the browser. If the dev server's default port is busy, the app is very likely ALREADY running; probe the default URL before spawning a second server.
 
-Live editing requires a local checkout; injection into deployed production sites (including HTTPS) is unsupported. For production inspection, use `<skill-base-dir>/scripts/impeccable detect <url>` or the browser extension, not the live helper. Do not disable browser security or weaken production CSP to enable live mode.
+Live editing requires a local checkout; injection into deployed production sites (including HTTPS) is unsupported. For production inspection, use `/designer detect <url>` or the browser extension, not the live helper. Do not disable browser security or weaken production CSP to enable live mode.
 
 ## The contract (read once)
 
 Execute in order. No step skipped, no step reordered. Every tool output in live mode may carry an `_instructions` field: it is the authoritative next step for that exact situation, with real ids and paths substituted; when it conflicts with your recollection of this document, `_instructions` wins.
 
-1. `impeccable live`: boot. If the request names or implies a file, route, or app inside a monorepo, infer the concrete path and run `<skill-base-dir>/scripts/impeccable live --target <path>` instead; then run the rest of this live session from the returned `projectRoot`. The boot resolves the app root from dev-server config files and persists it in `.impeccable/live/roots.json`; every helper re-anchors to that manifest at startup (a wrong cwd cannot fork session state), PRODUCT.md / DESIGN.md are discovered upward to the git root, and relative helper args like `--file` resolve against the app root.
-2. Open the app URL that serves `pageFile` (infer from `package.json`, docs, terminal output, or an open tab). Never use `serverPort`; it's the helper, not the app. **Cursor:** `browser_navigate` to that URL before polling; do not skip. **Other harnesses:** use the available browser tool; if the URL is uncertain, ask the user once.
-3. Poll loop with the default long timeout (600000 ms). Run `impeccable live-poll` again immediately after every event or `--reply`; Codex runs this one-shot poll in the foreground. Never pass a short `--timeout=`. The global bar's **Impeccable mark** dims with a pulsing amber dot when nothing is polling `/poll`; restart `impeccable live-poll` to reconnect.
+1. `impeccable live`: boot. If the request names or implies a file, route, or app inside a monorepo, infer the concrete path and run ``live` --target <path>` instead; then run the rest of this live session from the returned `projectRoot`. The boot resolves the app root from dev-server config files and persists it in `.impeccable/live/roots.json`; every helper re-anchors to that manifest at startup (a wrong cwd cannot fork session state), PRODUCT.md / DESIGN.md are discovered upward to the git root, and relative helper args like `--file` resolve against the app root.
+2. Open the app URL that serves `pageFile` (infer from `package.json`, docs, terminal output, or an open tab). Never use `serverPort`; it's the helper, not the app. Open it in a browser you control before polling; if the URL is uncertain, ask the user once.
+3. Poll loop with the default long timeout (600000 ms). Run `impeccable live-poll` again immediately after every event or `--reply`; run it as a one-shot in the foreground. Never pass a short `--timeout=`. The global bar's **Impeccable mark** dims with a pulsing amber dot when nothing is polling `/poll`; restart `impeccable live-poll` to reconnect.
 4. On `generate`: reuse `event.scaffold` when present; read the screenshot if present; load the action's reference; deliver variants; `--reply done`; poll again. Generate in this thread: you already hold the project's tokens and layout. The overlay preview IS the verification channel; do not screenshot, re-render, or QA variants between generate and accept. Apply craft-floor's contrast, spacing, and type floors by construction as you write; full verification runs once at accept on the chosen variant.
 5. On `steer`: read the message and `pageUrl`; do the work; `--reply steer_done`; poll again. No pickup ack.
 6. On `accept` / `discard`: the poll script runs `impeccable live-accept`, acknowledges delivery, and prints `_completionAck`. Plain accepts/discards are terminal immediately; carbonize accepts stay recoverable until `impeccable live-complete --id EVENT_ID` runs. Finish that cleanup before polling again.
 7. If interrupted, run `impeccable live-status` or `impeccable live-resume` before guessing. The journal under `.impeccable/live/sessions/` is canonical and replays unacknowledged work after a helper restart; the injected `live.js` re-attaches when the page reopens. Fall back to the direct-edit loop only when `impeccable live-resume` reports no active session, never because disconnects felt frequent.
 8. On `exit`: run the cleanup at the bottom.
 
-Harness policy:
-- **Claude Code**: run the poll as a **background task** (no short timeout); the harness notifies you on completion. Do not block the shell.
-- **Cursor**: **one-shot** poll in a **background terminal** with notify on `"type":"(steer|generate|accept|discard|manual_edit_apply|variant_mount_failed|prefetch|exit)"`; handle, `--reply`, restart the poll. Do **not** use `--stream` on Cursor (measured ~5s pickup vs sub-second one-shot).
-- **Codex**: default one-shot poll in a **yielded foreground exec session**. No `&`, no `--stream`, never leave Live without an active foreground poll. Starting the poll is not enough: SERVICE it (keep reading the exec session until it returns an event). Never announce "waiting for the user" and idle; a yielded poll nobody reads is a dead session, and the user's Go sits unanswered.
-- **Other harnesses**: one-shot foreground unless you know stdout reliably returns when a shell exits.
+Poll policy:
+- Run the one-shot poll in the foreground with the long timeout, so the turn stays attached to the event stream. When the wait must not block the turn, start it with the process tool and read its output; either way the poll is an obligation, not a fire-and-forget: a poll nobody reads is a dead session, and the user's Go sits unanswered. Never announce "waiting for the user" and idle.
+- Restart the poll immediately after every handled event and `--reply`. Never pass a short `--timeout=`.
 
-Delivery policy: atomic single-edit delivery everywhere; do not switch a harness to progressive publishing unless its poll loop is known not to block on the extra calls.
+Delivery policy: atomic single-edit delivery; do not switch to progressive publishing unless the poll loop is known not to block on the extra calls.
 
 Chat is overhead. No recap, no tutorial output, no pasting PRODUCT / DESIGN bodies. Spend tokens on tools and edits; on failure, one or two short sentences.
 
@@ -33,7 +33,7 @@ Chat is overhead. No recap, no tutorial output, no pasting PRODUCT / DESIGN bodi
 
 ```
 LOOP:
-  <skill-base-dir>/scripts/impeccable live-poll   # default long timeout; no --timeout=
+  `live-poll`   # default long timeout; no --timeout=
   Read JSON; dispatch on "type"
 
   "generate"  → Handle Generate; reply done; LOOP
@@ -49,12 +49,12 @@ LOOP:
 
 `variant_mount_failed` means the browser could not render what you published (`variant`, module `url`, `error`). The user sees a persistent error card, not variants. Fix the variant files, then `--reply EVENT_ID done --file <manifest or source path>`; the browser retries on its own.
 
-**Stream mode** (`--stream`, experimental, never on Cursor): one long-lived process, one JSON line per event, `--reply` from a separate command. Only for harnesses that read incremental stdout reliably.
+**Stream mode** (`--stream`, experimental): one long-lived process, one JSON line per event, `--reply` from a separate command. Only use it when you can read incremental stdout reliably, which the process tool does; the one-shot loop is the default.
 
 ## Start
 
 ```bash
-<skill-base-dir>/scripts/impeccable live
+`live`
 ```
 
 Output JSON: `{ ok, serverPort, serverToken, pageFiles, roots, hasProduct, product, productPath, hasDesign, design, designPath, hasSurfaceBrief, surfaceBrief }`. `roots` is the resolved root manifest; `projectRoot` mirrors `roots.appRoot`. The surface brief rides along; do not shell out to `impeccable surface-brief` separately. Precedence for generation: **DESIGN.md wins on visual decisions; PRODUCT.md wins on durable product and voice decisions; the surface brief wins on this surface's strategy.** When DESIGN.md is missing, identity is **not** absent; extract it from CSS variables, computed styles, and sibling components (Step 4 Phase A). Identity preservation is the default; departure requires the user's explicit redesign intent.
@@ -68,9 +68,9 @@ If output is `{ ok: false, error: "config_missing" | "config_invalid", path }`, 
 The append-only journal under `.impeccable/live/sessions/` is canonical durable state (not project source). When the chat was interrupted, polling was missed, the helper restarted, or the browser reloaded:
 
 ```bash
-<skill-base-dir>/scripts/impeccable live-status      # helper state, active sessions, queued events; works with the helper down
-<skill-base-dir>/scripts/impeccable live-resume --id SESSION_ID   # active snapshot, pending event, next safe action
-<skill-base-dir>/scripts/impeccable live-complete --id SESSION_ID # canonical manual final acknowledgement after verified cleanup
+`live-status`      # helper state, active sessions, queued events; works with the helper down
+`live-resume` --id SESSION_ID   # active snapshot, pending event, next safe action
+`live-complete` --id SESSION_ID # canonical manual final acknowledgement after verified cleanup
 ```
 
 Server restart rule: start `impeccable live-server` again, then poll; startup requeues unacknowledged events, so never ask the user to click Go again unless `impeccable live-resume` says no active session exists.
@@ -89,7 +89,7 @@ Speed matters; the user is watching the selected element. Reuse preflight metada
 2. If `event.scaffold` is present, use it and do **not** run the helper again. Otherwise:
 
 ```bash
-<skill-base-dir>/scripts/impeccable live-insert --id EVENT_ID --count EVENT_COUNT --position after \
+`live-insert` --id EVENT_ID --count EVENT_COUNT --position after \
   --element-id "ANCHOR_ID" --classes "class1,class2" --tag "section" --text "ANCHOR_TEXT"
 ```
 
@@ -110,7 +110,7 @@ When `event.scaffold` is present, the helper already found the source and comput
 **On source-preview targets `event.scaffold` carries `sourceWritten: false`.** The helper did NOT write the wrapper; it hands you `scaffold.wrapperBlock` plus the picked element's source range (`replaceStartLine`, `replaceEndLine`, 1-indexed). Write the wrapper **and** all variants in ONE edit: splice your variants into `wrapperBlock` at the "Variants: insert below this line" marker, then replace lines `[replaceStartLine, replaceEndLine]` with the result. A separate scaffold write reloads the framework before your variant write lands and strands the browser at 0/N. (`replaceEndLine < replaceStartLine` means insert mode: insert, remove nothing.) The `svelte-component` path never sets `sourceWritten`.
 
 ```bash
-<skill-base-dir>/scripts/impeccable live-wrap --id EVENT_ID --count EVENT_COUNT --element-id "ELEMENT_ID" --classes "class1,class2" --tag "div" --text "TEXT_SNIPPET"
+`live-wrap` --id EVENT_ID --count EVENT_COUNT --element-id "ELEMENT_ID" --classes "class1,class2" --tag "div" --text "TEXT_SNIPPET"
 ```
 
 Flag mapping (keep separate, never collapse into `--query`): `--element-id` ← `event.element.id`; `--classes` ← classes joined with commas; `--tag` ← tagName; `--text` ← first ~80 chars of textContent, **every call**: it disambiguates repeated sibling components, without it wrap lands on the first match. If `event.pageUrl` implies the file, pass `--file PATH`. If `--text` still matches several candidates, wrap exits `{ error: "element_ambiguous", candidates, fallback: "agent-driven" }`: pick the right range from page context and write the wrapper manually per the fallback flow.
@@ -242,14 +242,14 @@ Three kinds: `range` (slider; drives `--p-<id>`; author `var(--p-color-amount, 0
 ### 8. Signal done
 
 ```bash
-<skill-base-dir>/scripts/impeccable live-poll --reply EVENT_ID done --file RELATIVE_PATH
+`live-poll` --reply EVENT_ID done --file RELATIVE_PATH
 ```
 
 `RELATIVE_PATH` is relative to project root; the browser fetches source directly if the dev server lacks HMR. Then poll again immediately.
 
 ### Aborting an in-flight session
 
-If wrap or generation fails after the browser flipped to GENERATING, tell the **browser** so its bar resets: `<skill-base-dir>/scripts/impeccable live-poll --reply EVENT_ID error "Short reason"`. Never use `live-accept --discard` for this (pure file mutator, browser never sees it, bar sticks on dots); `--discard` is only source-side cleanup for a discard the browser itself initiated.
+If wrap or generation fails after the browser flipped to GENERATING, tell the **browser** so its bar resets: ``live-poll` --reply EVENT_ID error "Short reason"`. Never use `live-accept --discard` for this (pure file mutator, browser never sees it, bar sticks on dots); `--discard` is only source-side cleanup for a discard the browser itself initiated.
 
 ## Handle fallback
 
@@ -290,7 +290,7 @@ Event: `{id, _acceptResult, _completionAck}`. The poll script already restored t
 
 ## Handle `steer`
 
-Event: `{id, message, pageUrl}`: page-level direction from the global bar's Steer control (typed or spoken), no element context, no variant cycling. Read `message`, inspect the page or files as needed, make edits or answer in prose. Reply `<skill-base-dir>/scripts/impeccable live-poll --reply EVENT_ID steer_done ["Optional short toast"]`, or on failure `--reply EVENT_ID error "Short reason"`, then poll immediately. No separate pickup reply; the Steer bar unlocks on `steer_done` or `error`.
+Event: `{id, message, pageUrl}`: page-level direction from the global bar's Steer control (typed or spoken), no element context, no variant cycling. Read `message`, inspect the page or files as needed, make edits or answer in prose. Reply ``live-poll` --reply EVENT_ID steer_done ["Optional short toast"]`, or on failure `--reply EVENT_ID error "Short reason"`, then poll immediately. No separate pickup reply; the Steer bar unlocks on `steer_done` or `error`.
 
 ## Handle `prefetch`
 
@@ -306,7 +306,7 @@ When native subagents are available, delegate source edits to `impeccable_manual
 
 If `repair` is present, the previous Apply changed source but final validation failed. Fix the current source and return the same canonical JSON result; do not roll files back yourself. The browser will ask the user before any rollback.
 
-After source edits finish, reply exactly once with `<skill-base-dir>/scripts/impeccable live-poll --reply EVENT_ID done --data '{"status":"done","appliedEntryIds":["8hexid"],"failed":[],"files":["src/page.html"],"notes":[]}'`. Use `status:"partial"` or `status:"error"` with `failed[]` when not every entry applied. Then poll again. Never reply without the event id; `--reply done --file ...` is invalid for manual Apply.
+After source edits finish, reply exactly once with ``live-poll` --reply EVENT_ID done --data '{"status":"done","appliedEntryIds":["8hexid"],"failed":[],"files":["src/page.html"],"notes":[]}'`. Use `status:"partial"` or `status:"error"` with `failed[]` when not every entry applied. Then poll again. Never reply without the event id; `--reply done --file ...` is invalid for manual Apply.
 
 ## Exit
 
@@ -315,7 +315,7 @@ The user stops live mode by saying so in chat, closing the tab (SSE drops; poll 
 ## Cleanup
 
 ```bash
-<skill-base-dir>/scripts/impeccable live-server stop
+`live-server` stop
 ```
 
 Stops the helper and runs `impeccable live-inject --remove` to strip the injected script (use `stop --keep-inject` to keep it for a quick restart; `.impeccable/live/config.json` persists as project config). Then search for and remove any leftover `impeccable-variants-start` wrappers and `impeccable-carbonize-start` blocks.

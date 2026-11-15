@@ -17,8 +17,8 @@ The npm package (`@jalbarran/pi-designer`) is not published yet; the clone is th
 Then check for an older copy at `~/.pi/agent/extensions/designer` and remove it: two copies mean two
 `design_context` sections and a duplicated `/designer` command.
 
-Nothing else to install: the bundled launcher needs no Node runtime. On first use it downloads the
-version-pinned engine into `~/.impeccable/bin/<version>/` and verifies its sha256 sidecar.
+Nothing else to install: the engine is TypeScript in this package and runs inside pi. No launcher, no
+downloaded binary, no separate runtime.
 
 ## First run
 
@@ -62,6 +62,17 @@ and playbooks on demand, and `/designer <playbook>` forces one.
 |---|---|
 | `/designer` | Status: resolved file, `name`, sections, token references, spec verdict, engine version |
 | `/designer validate [path]` | Full spec report, for the file in effect or any other `DESIGN.md` |
+| `/designer detect [flags] [paths]` | Run the detector here, in process. `--json`, `--scope type`, `--scope layout` |
+| `/designer doctor [--json] [--fix]` | Report drift in this project's Impeccable artifacts; `--fix` applies only the migrations that carry no decision |
+| `/designer context` | What the project has: product and design records, visual implementation, platform, surface briefs |
+| `/designer palette [--id S \| --from KEY]` | A brand seed and the composition guidance that goes with it |
+| `/designer concept-seed [--scope …] [--from KEY]` | Deal a direction or surface round |
+| `/designer surface-brief <path\|list\|read\|write>` | The surface brief for a target: read it, or write one from a body file |
+| `/designer critique-storage <slug\|latest\|write\|trend\|close>` | Read and record critique snapshots; `write` takes `--meta` as JSON |
+| `/designer build-phase <start\|status\|advance\|record\|scaffold\|note\|finish>` | The comp-led build's phase machine: its gates, its state, and what to do next |
+| `/designer comp-spec --comp <png> …` | The comp's grid, measured spec, crops and plate prompts |
+| `/designer font-match --measure\|--rank <region>` | Read a text region's type, and rank the faces that fit it |
+| `/designer comp-diff --comp <png> --build <png>` | Score a capture against its comp, per region, and write the artifacts |
 | `/designer <playbook> [target]` | Route to an Impeccable playbook, described next |
 
 ## Playbooks
@@ -81,23 +92,25 @@ Everything else — `shape`, `extract`, `craft`, `bolder`, `quieter`, `distill`,
 `colorize`, `typeset`, `layout`, `delight`, `clarify`, `adapt`, `optimize`, `generate`, `overdrive` — is in the
 Commands table of `extensions/designer/skill/SKILL.md`, one line each, or in tab completion after `/designer`.
 
-## Detector from a shell
+## Running the detector
 
-`impeccable detect <paths>` runs the engine without the agent, linter-style. It reads `.impeccable/config.json`
-and `DESIGN.md` unless told otherwise, and its exit status is the verdict: `0` clean, `2` findings, `1` a target
-could not be scanned. Flags: `--json`, `--quiet`, `--scope type,layout`, `--no-config`, `--no-design-system`.
+`/designer detect [paths]` runs the engine inside pi. The engine is TypeScript in this package, so there is
+no binary to find and no child process: it reads `.impeccable/config.json` and `DESIGN.md` for the project,
+scans, and reports. Flags: `--json`, `--scope type`, `--scope layout`.
 
-```bash
-cd pi-designer                                # where you cloned it in Install
-IMP=extensions/designer/skill/scripts/impeccable
-$IMP detect src/                              # scan a tree
-$IMP detect --scope type src/App.tsx          # one domain, one file
-$IMP detect --json . | jq '.findings'         # machine-readable
+```
+/designer detect                        # the working directory
+/designer detect src/App.tsx            # one file
+/designer detect --scope type src/      # one domain
+/designer detect --json .               # machine-readable
 ```
 
-The launcher is not on `PATH`; symlink it as `impeccable` if you want the bare command. Findings are
-suppressed upstream's way: `impeccable ignores add-rule`, `add-file`, `add-value`, or an inline comment in the
-file itself (`/* impeccable-disable-line side-tab */`).
+Upstream's launcher is gone from this tree: it shelled out to a downloaded platform binary, and every
+verb it ran is either a `/designer` command now or one pi does not offer (`live-*`, `component-review`,
+`hooks`, `pin` — the reference pages for those say so at the top).
+
+Findings are suppressed upstream's way: `impeccable ignores add-rule`, `add-file`, `add-value`, or an inline
+comment in the file itself (`/* impeccable-disable-line side-tab */`).
 
 ## Discovery
 
@@ -124,6 +137,24 @@ the maintenance loop.
 That manifest is provenance, not wiring: it says which commit the tree started from, nothing reads it at
 runtime, and it stays as the record of where the divergence began.
 
+The tree is pi-only, and that is the point of owning it. Divergence from upstream is the design decision, not
+accident:
+
+- **One front door.** Upstream names its commands `/impeccable <verb>` in prose and in the "Suggested command"
+  lists its reports emit. pi has no such command (skills register as `/skill:name`), so every reference here
+  says `/designer <verb>`, and `SKILL.md` tells the agent to translate the engine's own `/impeccable` strings on
+  sight.
+- **No other harnesses.** Upstream's guidance branches on Claude Code, Codex, Cursor, Copilot, Grok Build, and
+  Gemini: their sub-agent tools, their background terminals, their browser panes. All of it is gone, replaced
+  with pi's own surfaces (`subagent`, the process tool, the browser tools). The "shipped agents" upstream spawns
+  (`impeccable-asset-producer` and friends) were never vendored; their `reference/degraded/` files are now the
+  subagent prompts outright.
+- **No hook surface.** Upstream's `hooks.md` installed a per-edit detector into other tools' manifests. pi
+  registers no tool hooks — review is manual, like a linter — so that file became `detector-config.md`, which
+  covers only what the detector reads when a command runs it (`impeccable ignores`, inline markers).
+
+Importing a newer upstream tree reintroduces all three; redo the rewrite when you do.
+
 `sync-upstream.mjs` remains as the importer that produced that snapshot. It replaces the tree wholesale, so
 running it again discards local guidance; use it only to import a newer upstream version on purpose, and read
 the diff first:
@@ -148,9 +179,12 @@ The skill's text is Apache-2.0, not MIT: attribution and license text live in `N
 - `extensions/designer/index.ts` — factory: prompt sections, `/designer` command, error notification
 - `extensions/designer/spec.ts` — spec reading, summary extraction, and validation
 - `extensions/designer/design-file.ts` — `DESIGN.md` discovery
+- `extensions/designer/engine/` — the TypeScript port of Impeccable's engine, so pi commands call the rule logic in process instead of spawning the binary. Currently the core spine: the rule catalog, finding construction, inline ignores, and shared helpers. The rule checks and the detect engines land here next.
 - `extensions/designer/scripts/sync-upstream.mjs` — imported the Pi build once; provenance in `skill/UPSTREAM.json`
 - `extensions/designer/skill/` — the Impeccable-derived skill, edited in place
+- `reference/impeccable-js/` — the pre-Rust JavaScript engine, unmodified, as the source the TypeScript port diffs against. `PORTING.md` maps every file to its port and its status; nothing here is published or imported.
 - `test/spec.ts` — spec reading, validation, and command wiring
+- `test/engine.ts` — the ported engine's catalog, findings, ignores, and helpers
 - `evals/` — behavioral evals: does an agent use these surfaces correctly? See `evals/README.md`
 
 ### Development

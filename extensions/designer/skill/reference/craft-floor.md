@@ -1,6 +1,6 @@
 # Craft floor
 
-Load this after the direction is settled, and build without announcing the checklist. A pinned brief or the committed visual world overrides anything here; your own habit does not. When the design hook is active it already enforces the mechanical checks below as you edit: act on its findings instead of re-auditing each rule.
+Load this after the direction is settled, and build without announcing the checklist. A pinned brief or the committed visual world overrides anything here; your own habit does not. Nothing enforces the mechanical checks below for you: no hook runs on an edit in pi, so the checks are yours to apply as you write, and a detector run afterwards is the only thing that will catch what you miss.
 
 ## Verify
 

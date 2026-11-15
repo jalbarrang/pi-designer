@@ -1,3 +1,5 @@
+> **Not available in this build.** pi has no live mode, and the launcher that ran `live-setup` is no longer vendored. This page is upstream's setup procedure, kept for reference only.
+
 One-time live-mode project setup. Loaded from [live.md](live.md) only when `impeccable live` reports `config_missing` / `config_invalid`, when `configDrift` needs handling, or when the config lacks `cspChecked`. Not part of the per-session hot path.
 
 ## Write the config
@@ -47,7 +49,7 @@ Keep all allowances below development-only, including manual middleware and meta
 If `config.cspChecked === true`, skip this whole section; the user was already asked once.
 
 ```bash
-<skill-base-dir>/scripts/impeccable detect-csp
+/designer detect-csp
 ```
 
 Output `{ shape, signals }`; the shape names the *patch mechanism*, so one template covers many frameworks:

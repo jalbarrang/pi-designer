@@ -18,7 +18,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test/spec.ts",
+    "test": "bun test/spec.ts && bun test/engine.ts && bun test/detect.ts && bun test/detect-facade.ts && bun test/critique-storage.ts && bun test/scan-command.ts && bun test/engine-verbs.ts && bun test/parity-color.mjs && bun test/parity-checks.mjs && bun test/parity-text.mjs && bun test/parity-design-system.mjs && bun test/parity-css-values.mjs && bun test/parity-html.mjs && bun test/parity-scan.mjs && bun test/parity-visual.mjs && bun test/parity-url.mjs && bun test/parity-config.mjs && bun test/parity-libs.mjs && bun test/parity-staleness.mjs && bun test/parity-context.mjs && bun test/parity-design-parser.mjs && bun test/parity-staleness-deep.mjs && bun test/parity-doctor.mjs && bun test/parity-signals.mjs && bun test/parity-roll.mjs && bun test/parity-concepts.mjs && bun test/parity-csp.mjs && bun test/parity-raster.mjs && bun test/parity-metrics.mjs && bun test/parity-fingerprint.mjs && bun test/parity-font-index.mjs && bun test/parity-font-match.mjs && bun test/parity-png.mjs && bun test/parity-comp-spec.mjs && bun test/parity-comp-diff.mjs && bun test/parity-hero-checks.mjs && bun test/parity-build-phase.mjs && bun test/parity-embed-prompt.mjs && bun test/parity-generate-image.mjs && bun test/parity-palette.mjs && bun test/parity-concept-seed.mjs && bun test/parity-decision-round.mjs && bun test/parity-surface-brief-command.mjs",
     "eval": "bun evals/run-evals.ts",
     "eval:grade": "bun evals/grade-evals.ts",
     "eval:test": "bun evals/test-grade.ts",
@@ -28,6 +28,10 @@
     "@earendil-works/pi-coding-agent": "^1.5.2",
     "@types/node": "26",
     "bun-types": "latest",
+    "css-select": "^7.0.0",
+    "css-tree": "^3.2.1",
+    "domutils": "^4.0.2",
+    "htmlparser2": "^12.0.0",
     "typescript": "^7.0.2"
   }
 }

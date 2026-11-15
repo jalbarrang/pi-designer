@@ -11,4 +11,16 @@ from that original: during import its command paths were rewritten to
 `<skill-base-dir>/scripts`, and the tree is edited in place from that commit
 onward. This notice covers those changes; the tree is not upstream's text.
 
+The package also carries a TypeScript port of Impeccable's engine at
+`extensions/designer/engine/`, derived from upstream's `crates/` and from the
+JavaScript detector those crates replaced. It is a port, not a fork: names,
+thresholds, rule ids, and finding shapes follow upstream, while the host-specific
+parts (browser globals, provider manifests) are replaced with pi's own surfaces.
+Apache-2.0 requires this notice as long as the port contains upstream's logic,
+which it does.
+
+The unmodified pre-Rust JavaScript the port is converted from sits in
+`reference/impeccable-js/` for diffing. It is reference only: not published, not
+imported, and still upstream's work under the same license.
+
 The full Apache License 2.0 text is in `THIRD_PARTY_LICENSES/Apache-2.0.txt`.

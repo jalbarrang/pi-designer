@@ -2,3 +2,5 @@ node_modules/
 evals/workspace/
 *.tsbuildinfo
 .DS_Store
+# Local task-tracker state; the record that matters is reference/impeccable-js/PORTING.md
+.dex/

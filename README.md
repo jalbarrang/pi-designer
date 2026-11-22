@@ -89,7 +89,7 @@ About two dozen playbooks sit behind `/designer`. The ones used most:
 |---|---|
 | `document` | Generate `DESIGN.md` from existing project code |
 | `critique` | UX design review with heuristic scoring |
-| `audit` | Technical quality checks: accessibility, performance, responsive. Add `--brief` for top findings only |
+| `audit` | Technical quality checks: performance, theming, integrity. Accessibility and responsive design are opt-in (`--a11y`, `--responsive`, `--all`). Add `--brief` for top findings only |
 | `encode` | Data encoding: chart vs table, the right mark, honest axes, zero-value bars |
 | `polish` | Final quality pass before shipping |
 | `init` | Capture durable product context in `PRODUCT.md` |

@@ -104,3 +104,16 @@ checkOk(
 	!!auditNative?.text.includes("you cannot invoke it") && !auditNative.text.includes("You can ask me to run these"),
 	auditNative?.text.slice(-600),
 );
+
+for (const [name, body] of [
+	["audit", audit],
+	["audit native", auditNative],
+] as const) {
+	const text = body?.text ?? "";
+	checkOk(
+		`${name}: a11y and responsive are opt-in`,
+		text.includes("opt-in") && text.includes("`--a11y`") && text.includes("`--responsive`") && text.includes("`--all`"),
+		text.slice(0, 400),
+	);
+	checkOk(`${name}: the default total is out of 12`, text.includes("**??/12**"), text.slice(0, 200));
+}

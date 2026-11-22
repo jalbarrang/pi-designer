@@ -57,7 +57,7 @@ Choose the mode from the requested surface, not the product, and persist it only
 | \`document\` | Build | Generate DESIGN.md from existing project code | \`reference/document.md\` |
 | \`extract [target]\` | Build | Pull reusable tokens and components into design system | \`reference/extract.md\` |
 | \`critique [target]\` | Evaluate | UX design review with heuristic scoring | \`reference/critique.md\` |
-| \`audit [target]\` | Evaluate | Technical quality checks (a11y, perf, responsive). Add \`--brief\` for top findings only | \`reference/audit.md\` · native: \`reference/audit.native.md\` |
+| \`audit [target]\` | Evaluate | Technical quality checks (perf, theming, integrity). A11y and responsive are opt-in: \`--a11y\`, \`--responsive\`, \`--all\`. Add \`--brief\` for top findings only | \`reference/audit.md\` · native: \`reference/audit.native.md\` |
 | \`encode [target]\` | Evaluate | Data encoding: chart vs table, mark choice, honest axes, zero-value bars | \`reference/encode.md\` |
 | \`polish [target]\` | Refine | Final quality pass before shipping | \`reference/polish.md\` |
 | \`bolder [target]\` | Refine | Amplify safe or bland designs | \`reference/bolder.md\` |

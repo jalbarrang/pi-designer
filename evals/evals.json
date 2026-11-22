@@ -58,7 +58,7 @@
       "id": "audit-uses-playbook",
       "prompt": "Audit the visual design of the pricing page. Tell me what's wrong with it — don't change any files.",
       "fixture": "design-system",
-      "expected": "Loads the Impeccable guidance through the tool before answering, and respects 'don't change any files'.",
+      "expected": "Loads the Impeccable guidance through the tool before answering, respects 'don't change any files', and audits the default scope: a11y and responsive stay out of the report unless asked.",
       "assertions": [
         {
           "id": "loads-the-guidance",
@@ -82,6 +82,45 @@
           "tool": "write",
           "arg": "path",
           "includes": ["DESIGN.md"]
+        },
+        {
+          "id": "states-the-default-scope",
+          "kind": "assistant_text",
+          "matches": "opt-in|--a11y|dimensions measured"
+        },
+        {
+          "id": "no-unrequested-a11y-or-responsive",
+          "kind": "assistant_text",
+          "notMatches": "aria-|alt (text|attribute)|tab order|keyboard (nav|trap)|screen ?reader|touch target|44 ?px|44x44|breakpoint|mobile viewport"
+        }
+      ]
+    },
+    {
+      "id": "audit-a11y-opt-in",
+      "prompt": "Audit the pricing page with --a11y. Don't change any files.",
+      "fixture": "design-system",
+      "expected": "Loads the guidance, honors the opt-in flag, and puts the accessibility dimension in the report rather than skipping it.",
+      "assertions": [
+        {
+          "id": "loads-the-guidance",
+          "kind": "tool_args_contains",
+          "tool": "design_check",
+          "arg": "action",
+          "includes": ["guide"],
+          "resultIncludes": ["Core principles"]
+        },
+        {
+          "id": "a11y-dimension-in-the-report",
+          "kind": "assistant_text",
+          "matches": "accessib"
+        },
+        { "id": "does-not-edit", "kind": "tool_not_called", "tool": "edit" },
+        {
+          "id": "no-src-writes",
+          "kind": "tool_not_called_matching",
+          "tool": "write",
+          "arg": "path",
+          "includes": ["src/"]
         }
       ]
     },

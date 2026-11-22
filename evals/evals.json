@@ -5,7 +5,7 @@
     {
       "name": "with_extension",
       "extension": true,
-      "description": "designer loaded: design_context section, Impeccable skill, /designer command."
+      "description": "designer loaded: design_context section, Impeccable skill, design_check tool, /designer command."
     },
     {
       "name": "without_extension",
@@ -58,14 +58,15 @@
       "id": "audit-uses-playbook",
       "prompt": "Audit the visual design of the pricing page. Tell me what's wrong with it — don't change any files.",
       "fixture": "design-system",
-      "expected": "Loads the Impeccable skill before answering, and respects 'don't change any files'.",
+      "expected": "Loads the Impeccable guidance through the tool before answering, and respects 'don't change any files'.",
       "assertions": [
         {
-          "id": "reads-the-skill",
+          "id": "loads-the-guidance",
           "kind": "tool_args_contains",
-          "tool": "read",
-          "arg": "path",
-          "includes": ["designer/skill"]
+          "tool": "design_check",
+          "arg": "action",
+          "includes": ["guide"],
+          "resultIncludes": ["Core principles"]
         },
         { "id": "does-not-edit", "kind": "tool_not_called", "tool": "edit" },
         {
@@ -88,15 +89,22 @@
       "id": "linter-detect",
       "prompt": "Run the design linter over `src/` and tell me what it reports.",
       "fixture": "design-system",
-      "expected": "Runs `impeccable detect` over src/ and relays its real output, including the advisory finding, instead of describing what a linter would probably say.",
+      "expected": "Calls design_check with action detect over src/ and relays its real output, including the advisory finding, instead of describing what a linter would probably say.",
       "assertions": [
         {
           "id": "runs-detect",
           "kind": "tool_args_contains",
-          "tool": "bash",
-          "arg": "command",
+          "tool": "design_check",
+          "arg": "action",
           "includes": ["detect"],
           "resultIncludes": ["anti-pattern"]
+        },
+        {
+          "id": "no-launcher-hunt",
+          "kind": "tool_not_called_matching",
+          "tool": "bash",
+          "arg": "command",
+          "includes": ["impeccable"]
         },
         {
           "id": "relays-the-advisory",
@@ -151,7 +159,7 @@
       "id": "validate-not-guessed",
       "prompt": "Is our DESIGN.md valid? Any errors I should fix?",
       "fixture": "design-system-broken",
-      "expected": "Does not claim the file conforms, and either points at /designer validate or names the real duplicate-section error.",
+      "expected": "Does not claim the file conforms, and either calls design_check with action validate or names the real duplicate-section error.",
       "assertions": [
         {
           "id": "no-false-verdict",
@@ -161,7 +169,7 @@
         {
           "id": "defers-or-reports",
           "kind": "assistant_text",
-          "matches": "(/designer validate|duplicate|repeated|appears twice|more than once)"
+          "matches": "(design_check|/designer validate|duplicate|repeated|appears twice|more than once)"
         },
         { "id": "does-not-edit", "kind": "tool_not_called", "tool": "edit" },
         {

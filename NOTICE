@@ -1,15 +1,15 @@
 pi-designer
 Copyright (c) 2026 Juan Albarran
 
-This package includes the Impeccable skill, a separate work by Paul Bakaus
+This package includes Impeccable's guidance, a separate work by Paul Bakaus
 (https://github.com/pbakaus/impeccable), licensed under the Apache License,
 Version 2.0.
 
-The included tree is `extensions/designer/skill/`, imported at the upstream
-commit recorded in `extensions/designer/skill/UPSTREAM.json`. It is modified
-from that original: during import its command paths were rewritten to
-`<skill-base-dir>/scripts`, and the tree is edited in place from that commit
-onward. This notice covers those changes; the tree is not upstream's text.
+The included text is `extensions/designer/guidance/`, imported at the upstream
+commit recorded in `extensions/designer/guidance/UPSTREAM.json`. It is modified
+from that original: cross-references were rewritten from file paths into guidance
+keys so the tool can serve them, and the text is edited in place from that commit
+onward. This notice covers those changes; the text is not upstream's text.
 
 The package also carries a TypeScript port of Impeccable's engine at
 `extensions/designer/engine/`, derived from upstream's `crates/` and from the

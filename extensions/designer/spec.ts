@@ -372,12 +372,22 @@ export function countFindings(findings: Finding[]): Record<Severity, number> {
 	return counts;
 }
 
+/**
+ * Stable identity for one finding across reads, so a report can compare the current file with the
+ * findings this session saw when it first opened the file. Line numbers stay out: an edit above a
+ * warning shifts it without making it a new problem.
+ */
+export function findingKey(finding: Finding): string {
+	return `${finding.severity}\u0000${finding.message}`;
+}
+
 /** Human-readable report used by `/designer validate`. */
-export function formatFindings(findings: Finding[]): string[] {
+export function formatFindings(findings: Finding[], preExisting?: ReadonlySet<string>): string[] {
 	const marks: Record<Severity, string> = { error: "\u2717", warning: "!", note: "\u00b7" };
 	return findings.map((finding) => {
 		const where = finding.line ? ` (line ${finding.line})` : "";
-		return `${marks[finding.severity]} ${finding.severity}${where}: ${finding.message}`;
+		const already = preExisting?.has(findingKey(finding)) ? " [pre-existing]" : "";
+		return `${marks[finding.severity]} ${finding.severity}${where}: ${finding.message}${already}`;
 	});
 }
 

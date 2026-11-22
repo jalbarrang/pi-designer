@@ -1,0 +1,9 @@
+{
+	"source": "https://github.com/pbakaus/impeccable",
+	"sourceSkill": ".pi/skills/impeccable",
+	"commit": "778c8a7b71cc",
+	"skillVersion": "4.5.0",
+	"engineVersion": "0.1.11",
+	"importedAt": "2026-11-15",
+	"note": "Provenance for the guidance corpus, not wiring: nothing reads this at runtime. It records which upstream commit the text started from; the text is edited in place here since."
+}

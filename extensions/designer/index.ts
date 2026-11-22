@@ -8,15 +8,21 @@
  *   tokens, then prose sections in a fixed order. Designer advertises it to the
  *   agent and checks it against that spec, so the design system stays the single
  *   source of truth for UI work.
- * - Impeccable guidance. `skill/` began as a snapshot of upstream's Pi build
+ * - Impeccable guidance. The text began as a snapshot of upstream's Pi build
  *   (github.com/pbakaus/impeccable) and is edited here from that commit on;
- *   `skill/UPSTREAM.json` records where it started. `bun scripts/sync-upstream.mjs`
- *   is the importer that produced it, not a maintenance loop.
+ *   `guidance/UPSTREAM.json` records where it started. It ships as data
+ *   (`guidance/corpus.ts`, `guidance/router.ts`), not as a skill tree: the model
+ *   reads it through the tool, so there is no file to discover and no path to
+ *   resolve. `scripts/import-guidance.mjs` is the importer that produced it.
  *
  * Audits are manual, like running a linter. No tool hooks are registered: nothing
  * scans an edit, blocks a write, or pushes findings into a turn. Design review
- * happens when it is asked for — `/designer <playbook>` routes to Impeccable, and
+ * happens when it is asked for — `/designer <playbook>` delivers the guidance, and
  * `/designer detect <paths>` runs the detector here, in process.
+ *
+ * The engine is reachable from both sides of the conversation: the command notifies
+ * the human, and the `design_check` tool returns the same text to the model, so an
+ * audit reads real findings instead of guessing what a design linter would say.
  *
  * Ownership rules:
  * - The design file is advertised, never inlined, the way skills load, so its
@@ -25,65 +31,75 @@
  *   by name, so a tag that varied per project would churn the cache.
  * - Spec problems go to the human, once per session, never into the prompt: a
  *   broken design file is not the agent's task to fix.
- * - Design review is routed by a fixed `design_workflow` section. The skill's own
- *   description is not enough: with it alone, 1 of 3 audit runs loaded the skill
+ * - Design review is routed by a fixed `design_workflow` section. The guidance's own
+ *   description was not enough: with only a skill entry, 1 of 3 audit runs loaded it
  *   and the other two improvised a review from the design file and screenshots.
  *
  * Commands:
  * - `/designer` — status: which DESIGN.md is in play and whether it conforms
  * - `/designer validate [path]` — full spec report
- * - `/designer <playbook> [target]` — route to an Impeccable playbook
+ * - `/designer <playbook> [target]` — deliver a playbook, router and body in one message
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { findDesignFile } from "./design-file.ts";
-import { analyzeDesign, type DesignAnalysis, formatFindings, summarize } from "./spec.ts";
+import { analyzeDesign, type DesignAnalysis, type Finding, findingKey, formatFindings, summarize } from "./spec.ts";
+import type { DesignScope } from "./engine/types.ts";
 import { runScan } from "./engine/lib/scan-command.ts";
 import { runDoctor } from "./engine/doctor.ts";
-import { ENGINE_VERBS } from "./engine/lib/engine-verbs.ts";
+import { ENGINE_VERBS, renderContext } from "./engine/lib/engine-verbs.ts";
+import { GUIDANCE_KEYS, PLAYBOOK_NAMES, readGuidance, routePlaybook } from "./guidance/index.ts";
 
 /** Fixed tag: pi diffs prompt sections by name, so it must not vary per project. */
 const SECTION_NAME = "design_context";
 /**
  * Its own section, not a line in `design_context`: audits are requested in
- * projects without a DESIGN.md too, and the skill being vendored is independent
+ * projects without a DESIGN.md too, and the guidance being carried is independent
  * of the design file existing.
  */
 const WORKFLOW_SECTION_NAME = "design_workflow";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SKILL_DIR = path.join(HERE, "skill");
-const SKILL_FILE = path.join(SKILL_DIR, "SKILL.md");
+/** The model's half of the engine surface: the reports the command shows the human. */
+const TOOL_NAME = "design_check";
+
 /**
- * A skill's description only earns a load when the task matches it, and audits
- * did not match often enough (1 of 3 runs). This states the routing outright and
- * names the file, so the agent does not have to infer it from the skill list.
+ * The guidance is content this package owns, served by the tool. A skill's description only earned a
+ * load when the task matched it, and audits did not match often enough (1 of 3 runs), so the routing
+ * is stated outright and names the tool instead of a file.
  */
 const WORKFLOW_SECTION =
-	`When the user asks for a design review, critique, audit, or polish, read ${SKILL_FILE} and follow its playbook before answering. It carries the rule catalog and the review procedure; do not improvise a review from the design file alone.`;
-const COMMAND_METADATA = path.join(SKILL_DIR, "scripts", "command-metadata.json");
+	`When the user asks for a design review, critique, audit, or polish, or asks whether a chart or table is the right representation, call ${TOOL_NAME} with action "guide" and name "router" before answering, then run the playbook it routes you to. It carries the rule catalog and the review procedure; do not improvise a review from the design file alone.`;
+/** Custom type for the routed playbook, so it reads as extension traffic and never as a typed prompt. */
+const PLAYBOOK_MESSAGE_TYPE = "designer-playbook";
 /** Designer's own verbs, which are not Impeccable playbooks. */
 const OWN_VERBS = ["status", "validate", "detect", "doctor", "context", "palette", "concept-seed", "critique-storage", "surface-brief", "build-phase", "comp-spec", "font-match", "comp-diff"] as const;
-/**
- * Skill verbs the vendored command metadata does not list, for completion only: both are owned
- * above, so the routing table does not need them. `hooks` is deliberately absent everywhere — it
- * installs detector hooks into other harnesses' manifests (`.claude/`, `.cursor/`, a committed
- * `.github/`) and pi is not one of them.
- */
-const EXTRA_VERBS: ReadonlyMap<string, string> = new Map([
-	["doctor", "Report and repair drift in this project's Impeccable artifacts"],
-]);
 
 interface Resolved {
 	path: string;
 	analysis: DesignAnalysis;
 }
 
+/**
+ * Findings each file had when this session first read it. `validate` marks those `[pre-existing]`,
+ * so a report does not present the file's old warnings as work from the current turn.
+ */
+const sessionBaseline = new Map<string, ReadonlySet<string>>();
+
+function rememberBaseline(filePath: string, findings: readonly Finding[]): ReadonlySet<string> {
+	const known = sessionBaseline.get(filePath);
+	if (known) return known;
+	const baseline = new Set(findings.map(findingKey));
+	sessionBaseline.set(filePath, baseline);
+	return baseline;
+}
+
 function analyzeFile(filePath: string): Resolved {
-	return { path: filePath, analysis: analyzeDesign(fs.readFileSync(filePath, "utf8")) };
+	const analysis = analyzeDesign(fs.readFileSync(filePath, "utf8"));
+	rememberBaseline(filePath, analysis.findings);
+	return { path: filePath, analysis };
 }
 
 /** The project's design file and its analysis, or null when there is none. */
@@ -101,38 +117,67 @@ function buildSection(resolved: Resolved): string {
 		"Read it with the read tool before deciding on UI, layout, styling, component structure, or architecture, and follow the conventions it defines.",
 	);
 	lines.push(
-		"Validity is checked by /designer validate, which the user runs: do not claim the file conforms to the spec.",
+		`Check it with the ${TOOL_NAME} tool (action "validate") before claiming the file conforms to the spec; do not assume it does.`,
 	);
 	if (summary) lines.push(`Summary: ${summary}`);
 	return lines.join("\n");
 }
 
-/** Impeccable playbook names from the vendored command metadata, for completion and routing. */
-function loadPlaybooks(): Map<string, string> {
-	const playbooks = new Map<string, string>(EXTRA_VERBS);
-	if (!fs.existsSync(COMMAND_METADATA)) return playbooks;
 
-	try {
-		const metadata: unknown = JSON.parse(fs.readFileSync(COMMAND_METADATA, "utf8"));
-		if (typeof metadata !== "object" || metadata === null) return playbooks;
+/** The spec report for a file: what the command notifies and what the tool returns. */
+function specReport(cwd: string, requested: string): string | null {
+	const target = requested ? path.resolve(cwd, requested) : findDesignFile(cwd);
+	if (!target || !fs.existsSync(target)) return null;
 
-		for (const [name, entry] of Object.entries(metadata)) {
-			const description =
-				typeof entry === "object" && entry !== null && typeof (entry as { description?: unknown }).description === "string"
-					? (entry as { description: string }).description
-					: undefined;
-			playbooks.set(name, description ? oneLine(description) : name);
-		}
-	} catch {
-		// A malformed metadata file only costs completions; routing stays by name.
-	}
-	return playbooks;
+	const resolved = analyzeFile(target);
+	const baseline = sessionBaseline.get(target) ?? new Set<string>();
+	const findings = resolved.analysis.findings;
+	const report = formatFindings(findings, baseline);
+	const preExisting = findings.filter((finding) => baseline.has(findingKey(finding))).length;
+	const preExistingLabel = preExisting > 0 ? ` (${preExisting} pre-existing)` : "";
+	const legend = preExisting > 0 ? "\npre-existing: present when this session first read the file; not a change made during this session." : "";
+	const header = `${resolved.path}\n${summarize(findings)}${preExistingLabel}${legend}`;
+	return report.length > 0 ? `${header}\n${report.join("\n")}` : `${header}\nconforms to the design.md spec`;
 }
 
-/** Keep a metadata description to a short, single-line completion label. */
-function oneLine(text: string): string {
-	const collapsed = text.replace(/\s+/g, " ").trim();
-	return collapsed.length > 90 ? `${collapsed.slice(0, 89)}…` : collapsed;
+/** What one `design_check` call answers, as text the model reads. */
+interface CheckParams {
+	readonly action: "detect" | "validate" | "context" | "guide";
+	readonly targets?: readonly string[];
+	readonly scopes?: readonly DesignScope[];
+	readonly target?: string;
+	/** guide: a playbook name, a guidance key, or a leftover path into the retired skill tree. */
+	readonly name?: string;
+}
+
+/**
+ * One `design_check` call.
+ *
+ * `context` says which design records the project has, so setup does not guess. `detect` scans files
+ * and returns the findings, so an audit reports what the detector saw rather than what a linter might
+ * plausibly say. `validate` returns the spec report, so the model can check the design file instead of
+ * asserting it conforms. `guide` returns Impeccable's guidance, which is the package's own text rather
+ * than a file the model has to find. The scans default to the working directory.
+ */
+async function runDesignCheck(params: CheckParams, cwd: string): Promise<string> {
+	if (params.action === "guide") {
+		const found = readGuidance(params.name ?? "router");
+		if (found) return found.text;
+		const known = [...PLAYBOOK_NAMES].sort().join(", ");
+		return `No guidance under "${params.name ?? ""}". Playbooks: ${known}. Keys look like "router" or "reference/new-work.md".`;
+	}
+
+	if (params.action === "context") return renderContext(cwd);
+
+	if (params.action === "validate") {
+		return specReport(cwd, params.target ?? "") ?? "No DESIGN.md between the working directory and the repo root.";
+	}
+
+	const run = await runScan({ targets: params.targets ?? [], cwd, scopes: params.scopes ?? [] });
+	const lines = [run.text, ...run.warnings.map((warning) => `warning: ${warning}`)];
+	if (run.degraded) lines.push("The HTML parser is not installed, so markup was scanned as text.");
+	if (run.notice) lines.push(run.notice);
+	return lines.filter(Boolean).join("\n");
 }
 
 /** Report spec errors to the human once per file, in UI modes only. */
@@ -153,15 +198,10 @@ function notifySpecErrors(resolved: Resolved, ctx: ExtensionContext, notified: S
 export default function designer(pi: ExtensionAPI) {
 	/** Files already reported this runtime, so the warning is not repeated every turn. */
 	const notified = new Set<string>();
-	const playbooks = loadPlaybooks();
-	const hasSkill = fs.existsSync(SKILL_FILE);
-
-	// Keep the vendored guidance discoverable for ordinary frontend requests.
-	if (hasSkill) pi.on("resources_discover", () => ({ skillPaths: [SKILL_FILE] }));
+	const playbooks = PLAYBOOK_NAMES;
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (hasSkill) event.systemPromptOptions.sections[WORKFLOW_SECTION_NAME] = WORKFLOW_SECTION;
-		else delete event.systemPromptOptions.sections[WORKFLOW_SECTION_NAME];
+		event.systemPromptOptions.sections[WORKFLOW_SECTION_NAME] = WORKFLOW_SECTION;
 
 		const resolved = resolveDesign(ctx.cwd);
 
@@ -175,29 +215,76 @@ export default function designer(pi: ExtensionAPI) {
 	});
 
 	const reportSpec = (ctx: ExtensionCommandContext, requested: string) => {
-		const target = requested ? path.resolve(ctx.cwd, requested) : findDesignFile(ctx.cwd);
-		if (!target) {
-			ctx.ui.notify("designer: no DESIGN.md found between the working directory and the repo root.", "warning");
+		const report = specReport(ctx.cwd, requested);
+		if (report) {
+			ctx.ui.notify(report, "info");
 			return;
 		}
-		if (!fs.existsSync(target)) {
-			ctx.ui.notify(`designer: no DESIGN.md at ${target}`, "warning");
-			return;
-		}
-
-		const resolved = analyzeFile(target);
-		const report = formatFindings(resolved.analysis.findings);
-		const header = `${resolved.path}\n${summarize(resolved.analysis.findings)}`;
 		ctx.ui.notify(
-			report.length > 0 ? `${header}\n${report.join("\n")}` : `${header}\nconforms to the design.md spec`,
-			"info",
+			requested
+				? `designer: no DESIGN.md at ${path.resolve(ctx.cwd, requested)}`
+				: "designer: no DESIGN.md found between the working directory and the repo root.",
+			"warning",
 		);
 	};
+
+	// The model's way into the engine. The command reports to the human; this returns the same text to
+	// the agent, so an audit reads findings instead of asking the user to run a command and paste back.
+	pi.registerTool({
+		name: TOOL_NAME,
+		label: "Design check",
+		description:
+			"Read this package's design guidance, run the project's design detector over files, check its DESIGN.md against the design.md spec, or report which design records the project has.",
+		promptSnippet: `${TOOL_NAME} — design guidance and playbooks, the design detector, DESIGN.md validation, project design records`,
+		promptGuidelines: [
+			`Use ${TOOL_NAME} with action "guide" to load Impeccable's guidance: name "router" for the entry guidance and command table, or a playbook name such as "critique" or "polish". Guidance text names other guidance as keys like \`reference/new-work.md\`; read one with the same action and that name. There is no file to find.`,
+			`Use ${TOOL_NAME} with action "context" once per session, before design work, instead of assuming which design records exist.`,
+			`Use ${TOOL_NAME} with action "detect" when asked what a design linter reports, or before a design audit: it returns real findings from HTML and CSS rather than a description of what a linter might say.`,
+			`Use ${TOOL_NAME} with action "validate" before claiming DESIGN.md conforms to the spec.`,
+		],
+		parameters: Type.Object({
+			action: Type.Union(
+				[Type.Literal("context"), Type.Literal("detect"), Type.Literal("guide"), Type.Literal("validate")],
+				{
+					description:
+						"guide: design guidance and playbooks. context: which design records this project has. detect: scan files for design anti-patterns. validate: check a DESIGN.md against the spec.",
+				},
+			),
+			name: Type.Optional(
+				Type.String({
+					description:
+						'guide: "router" for the entry guidance, a playbook name like "critique", or a key from the guidance like "reference/new-work.md".',
+				}),
+			),
+			targets: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "detect: files or directories, relative to the project. Defaults to the working directory.",
+				}),
+			),
+			scopes: Type.Optional(
+				Type.Array(Type.Union([Type.Literal("type"), Type.Literal("layout")]), {
+					description: "detect: narrow to the type rules, the layout rules, or both.",
+				}),
+			),
+			target: Type.Optional(
+				Type.String({ description: "validate: path to a DESIGN.md. Defaults to this project's file." }),
+			),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			// The engine is TypeScript in this package, so a tool call is a function call: no binary to
+			// find, no child to wait on, and no report to parse back out of stdout.
+			//
+			// Guidance is returned whole, not truncated the way a search result would be: the text is the
+			// deliverable, and there is no file behind it for a pointer to name.
+			const text = await runDesignCheck(params, ctx.cwd);
+			return { content: [{ type: "text", text }], details: { action: params.action, name: params.name } };
+		},
+	});
 
 	pi.registerCommand("designer", {
 		description: "Own this project's DESIGN.md, or run an Impeccable design playbook",
 		getArgumentCompletions(prefix) {
-			const matches = [...OWN_VERBS, ...playbooks.keys()].filter((name) => name.startsWith(prefix));
+			const matches = [...OWN_VERBS, ...playbooks].filter((name) => name.startsWith(prefix));
 			return matches.length ? matches.map((value) => ({ value, label: value })) : null;
 		},
 		handler: async (args, ctx) => {
@@ -256,18 +343,18 @@ export default function designer(pi: ExtensionAPI) {
 				return;
 			}
 
-			if (playbooks.has(subcommand)) {
-				if (!hasSkill) {
-					ctx.ui.notify(
-						`designer: the Impeccable skill is missing from ${HERE}. Reinstall the package; the skill ships with it.`,
-						"warning",
-					);
-					return;
-				}
-
-				pi.sendUserMessage(
-					`Use Impeccable for this request. Read ${JSON.stringify(SKILL_FILE)} and follow its routing and setup instructions. Resolve relative reference and script paths from ${JSON.stringify(SKILL_DIR)}.\n\nArguments: ${[subcommand, requested].filter(Boolean).join(" ")}`,
-					{ deliverAs: "followUp" },
+			const routed = routePlaybook(subcommand);
+			if (routed) {
+				// A custom message, not a user message: the order reaches the model the same way, but the
+				// transcript shows extension traffic rather than a prompt the user never typed. The text is
+				// the router plus the playbook body, so there is no path to resolve and nothing to read first.
+				await pi.sendMessage(
+					{
+						customType: PLAYBOOK_MESSAGE_TYPE,
+						content: `Use Impeccable for this request, following this guidance.\n\n${routed.text}\n\nRequest: ${[subcommand, requested].filter(Boolean).join(" ")}`,
+						display: false,
+					},
+					{ deliverAs: "followUp", triggerTurn: true },
 				);
 				return;
 			}
@@ -294,7 +381,7 @@ export default function designer(pi: ExtensionAPI) {
 					`sections: ${sections.length ? sections.join(", ") : "(none)"}`,
 					`references: ${references}`,
 					`spec: ${summarize(findings)}`,
-					hasSkill ? `impeccable: ${path.relative(HERE, SKILL_DIR)} (${playbooks.size} playbooks)` : "impeccable: not vendored",
+					`impeccable: ${playbooks.length} playbooks, ${GUIDANCE_KEYS.length} guidance keys`,
 				].join("\n"),
 				"info",
 			);

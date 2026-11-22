@@ -33,6 +33,7 @@ try {
 	const clean = await runScan({ targets: ["src/clean.html"], cwd: dir });
 	check("a clean file reports no findings", clean.findings, 0);
 	check("a clean file still prints a summary", clean.text.includes("anti-patterns found"), true);
+	check("a clean scan states what it does not cover", clean.text.includes("Mechanical checks only"), true);
 	check("a clean scan is not degraded", clean.degraded, false);
 	check("a clean scan has no comp-round notice", clean.notice, null);
 

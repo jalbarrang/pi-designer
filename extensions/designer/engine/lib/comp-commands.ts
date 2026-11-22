@@ -15,8 +15,8 @@ import { matchRegion } from "./font-match.ts";
 import { loadFontIndex } from "./font-index.ts";
 import { diffBuilds } from "./comp-diff.ts";
 
-/** The catalog index that ships with the skill, resolved from this module so any cwd finds it. */
-const SKILL_FONT_INDEX = fileURLToPath(new URL("../../skill/scripts/data/font-index.json", import.meta.url));
+/** The catalog index this package ships, resolved from this module so any cwd finds it. */
+const FONT_INDEX = fileURLToPath(new URL("../data/font-index.json", import.meta.url));
 
 /** What one comp command produced. */
 interface CompResult {
@@ -136,7 +136,7 @@ function runFontMatch({ args, cwd = process.cwd() }: { readonly args: readonly s
 	if (!region) return { text: `no region ${id}; ids: ${spec.regions.map((entry) => entry.id).join(", ")}`, failed: true };
 
 	const comp = loadRaster(resolveIn(cwd, spec.comp)).image;
-	const index = loadFontIndex(flags.value("index") ? resolveIn(cwd, flags.value("index") as string) : SKILL_FONT_INDEX);
+	const index = loadFontIndex(flags.value("index") ? resolveIn(cwd, flags.value("index") as string) : FONT_INDEX);
 	const match = matchRegion({ crop: crop(comp, region.px.x, region.px.y, region.px.w, region.px.h), own: parseOwn(flags.value("candidates")), index });
 
 	if (!match.fingerprint) return { text: `MEASURE ${id}: no separable lettering in the crop; size the region by its box instead`, failed: true };

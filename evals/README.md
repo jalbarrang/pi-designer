@@ -1,9 +1,9 @@
 # Evals
 
 Behavioral evals for designer's agent-facing surface: does an agent **read the
-`DESIGN.md` before touching UI**, **reach for the Impeccable skill** when asked
-for an audit, **run `detect`** instead of describing what a linter might say,
-and **never assume an automatic hook** is watching?
+`DESIGN.md` before touching UI**, **load the Impeccable guidance** when asked
+for an audit, **call the `design_check` tool** instead of describing what a
+linter might say, and **never assume an automatic hook** is watching?
 
 This is not the unit-test suite. `bun run test` covers the deterministic
 code (spec reading, validation, command wiring, and the engine's own
@@ -15,14 +15,19 @@ bun run test           → did we break the code?
 bun evals/run-evals.ts → did we break the agent's behavior?
 ```
 
-Designer registers no tool hooks and exposes no tools. Its surface is three
-things, and each case targets one:
+Designer registers no tool hooks. Its surface is four things, and each case
+targets one:
 
 | Surface | Where it comes from | Graded by |
 |---|---|---|
 | `design_context` prompt section | `before_agent_start` | `system_prompt_section` |
-| Impeccable skill (`skill/SKILL.md`) | `resources_discover` | `tool_args_contains` on `read` |
-| `impeccable detect` | the vendored CLI, run through `bash` | `tool_args_contains` on `bash` |
+| Impeccable guidance | `registerTool`, in process | `tool_args_contains` on `design_check` |
+| `design_check` tool | `registerTool`, in process | `tool_args_contains` on `design_check` |
+| `/designer <playbook>` routing | `registerCommand` + `sendMessage` | `assistant_text` on the run that follows |
+
+The deterministic half of that surface — the sections' shape, the tool's schema
+and reports, the routing message — is covered by `bun run test`; these evals cover
+the half that only exists once a model is deciding what to call.
 
 ## The process
 
@@ -130,11 +135,12 @@ removed design hook: `design_hook` must never come back.
   edit is the behavior that matters. It runs on `design-system-large` (36 files)
   so that `DESIGN.md` is not the first thing a run sees; on the 8-file fixture a
   good model found it with or without the advertisement.
-- **Case 3 depends on the skill being discoverable.** `resources_discover`
-  registers `skill/SKILL.md`, and the case expects the agent to load it for an
+- **Case 3 depends on the tool and the routing section.** `design_check` action
+  `guide` serves the router, and the case expects the agent to load it for an
   audit. It failed in both configs before the `design_workflow` section (1/3
-  with the extension, 0/3 without) and passes 3/3 after it. If pi changes how
-  skills are advertised, re-read the transcript before touching the assertion.
+  with the extension, 0/3 without) and passes 3/3 after it. If the tool's
+  description or the section changes, re-read the transcript before touching the
+  assertion.
 - **Writes outside the fixture are allowed.** `audit-uses-playbook` forbids
   `edit` and any `write` into `src/` or `DESIGN.md`, not every write: the model
   legitimately renders screenshots into `/tmp` to look at the page.

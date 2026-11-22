@@ -20,7 +20,7 @@ import type { DesignScope, Finding } from "../types.ts";
 // ─── Output formatting ─────────────────────────────────────────────────────
 
 function formatFindingSummary(count: number): string {
-	return `${count} anti-pattern${count === 1 ? "" : "s"} found.`;
+	return `${count} anti-pattern${count === 1 ? "" : "s"} found. Mechanical checks only: data encoding, content, and visual judgment are not scanned.`;
 }
 
 /** The local filesystem path behind a `file://` URL, or null when it cannot be mapped. */

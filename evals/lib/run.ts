@@ -10,9 +10,8 @@
  *   --no-approve  do not trust project-local `.pi` in the fixture
  *   -nc         no AGENTS.md/CLAUDE.md: your global instructions do not steer
  *               the case, and the fixtures carry none of their own
- *   -ns         no discovered skills. Extension-registered skills survive (the
- *               probe confirms designer's impeccable is still there), so the
- *               baseline has no skills at all and the delta is designer's.
+ *   -ns         no discovered skills: the fixtures carry none, so the baseline
+ *               starts with the same (empty) skill list as the extension runs.
  *   --session-dir  keep the session file for debugging
  */
 

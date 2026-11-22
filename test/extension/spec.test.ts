@@ -238,11 +238,28 @@ checkOk("discovery: filesystem root is safe", findDesignFile("/") === null);
 
 const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
 let command: { getArgumentCompletions?: (prefix: string) => unknown; handler: (args: string, ctx: unknown) => Promise<void> } | undefined;
-const sentMessages: string[] = [];
+interface RegisterableTool {
+	name: string;
+	promptSnippet?: string;
+	promptGuidelines?: string[];
+	parameters: { properties?: Record<string, unknown> };
+	execute: (
+		toolCallId: string,
+		params: { action: "detect" | "validate" | "context"; targets?: string[]; scopes?: Array<"type" | "layout">; target?: string },
+		signal: AbortSignal | undefined,
+		onUpdate: undefined,
+		ctx: { cwd: string },
+	) => Promise<{ content: Array<{ type: string; text: string }>; details?: unknown }>;
+}
+let tool: RegisterableTool | undefined;
+const routed: Array<{ customType: string; content: string; display: boolean }> = [];
+const sentMessages = routed;
 const fakePi = {
 	on: (event: string, handler: (e: unknown, c: unknown) => Promise<unknown>) => handlers.set(event, handler),
 	registerCommand: (_name: string, options: typeof command) => (command = options),
-	sendUserMessage: (message: string) => sentMessages.push(message),
+	registerTool: (definition: RegisterableTool) => (tool = definition),
+	sendMessage: (message: { customType: string; content: string; display: boolean }) =>
+		Promise.resolve(routed.push(message)),
 } as never;
 
 designer(fakePi);
@@ -259,13 +276,13 @@ checkOk("prompt: project file advertised", section?.includes(join(deep, "DESIGN.
 checkOk("prompt: advertises, does not inline", !!section && !section.includes("# Package"), section);
 checkOk("prompt: no design_hook section", sections.design_hook === undefined, JSON.stringify(sections));
 checkOk(
-	"prompt: validity is deferred to the command",
-	!!sections.design_context?.includes("/designer validate"),
+	"prompt: validity is routed to the tool",
+	!!sections.design_context?.includes("design_check"),
 	section,
 );
 checkOk(
-	"prompt: audit routing names the skill",
-	!!sections.design_workflow?.includes("SKILL.md"),
+	"prompt: audit routing names the guidance tool",
+	!!sections.design_workflow?.includes("design_check"),
 	sections.design_workflow,
 );
 
@@ -346,6 +363,27 @@ notes.length = 0;
 await command!.handler("validate /does/not/exist.md", { cwd: deep, hasUI: true, ui: { notify } });
 checkOk("command: missing file warns", notes.join("\n").includes("no DESIGN.md at"), notes.join(" | "));
 
+// A finding already present on the first read is marked; one introduced after it is not.
+const legacyDir = join(base, "legacy");
+mkdirSync(legacyDir, { recursive: true });
+const legacyFile = join(legacyDir, "DESIGN.md");
+writeFileSync(legacyFile, "---\nname: Legacy\n---\n\n## Iconography\n\nA.\n");
+notes.length = 0;
+await command!.handler(`validate ${legacyFile}`, { cwd: legacyDir, hasUI: true, ui: { notify } });
+const firstRead = notes.join("\n");
+checkOk("validate: first session read marks findings pre-existing", firstRead.includes("pre-existing: present when this session first read"), firstRead);
+checkOk("validate: the pre-existing marker is on the finding", firstRead.includes("[pre-existing]"), firstRead);
+
+writeFileSync(legacyFile, "---\nname: Legacy\n---\n\n## Iconography\n\nA.\n\n## Colors\n\nB.\n");
+notes.length = 0;
+await command!.handler(`validate ${legacyFile}`, { cwd: legacyDir, hasUI: true, ui: { notify } });
+const secondRead = notes.join("\n");
+checkOk(
+	"validate: a finding introduced later is not marked pre-existing",
+	secondRead.split("\n").some((line) => line.includes("missing section(s)") && !line.includes("[pre-existing]")),
+	secondRead,
+);
+
 const completions = command!.getArgumentCompletions?.("p") as Array<{ value: string }> | null;
 checkOk(
 	"completions: playbooks come from the vendored metadata",
@@ -361,13 +399,28 @@ checkOk(
 sentMessages.length = 0;
 notes.length = 0;
 await command!.handler("polish src/routes", { cwd: deep, hasUI: true, ui: { notify } });
-checkOk("command: playbook routes to the vendored skill", sentMessages.length === 1, String(sentMessages.length));
+checkOk("command: playbook routes to the guidance", sentMessages.length === 1, String(sentMessages.length));
 checkOk(
-	"command: routed message names the vendored SKILL.md",
-	sentMessages[0]?.includes(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "extensions", "designer", "skill", "SKILL.md")) ?? false,
-	sentMessages[0] ?? "",
+	"command: routed message carries the router",
+	sentMessages[0]?.content.includes("Core principles") ?? false,
+	sentMessages[0]?.content.slice(0, 120) ?? "",
 );
-checkOk("command: routed message carries the arguments", sentMessages[0]?.includes("polish src/routes") ?? false, sentMessages[0] ?? "");
+checkOk(
+	"command: routed message carries the playbook body",
+	sentMessages[0]?.content.includes("Follow the quality guidance") ?? false,
+	sentMessages[0]?.content.slice(-200) ?? "",
+);
+checkOk(
+	"command: routing carries no file path",
+	!(sentMessages[0]?.content.includes("skill/SKILL.md") ?? true),
+	sentMessages[0]?.content.slice(0, 200) ?? "",
+);
+checkOk("command: routed message carries the arguments", sentMessages[0]?.content.includes("polish src/routes") ?? false, sentMessages[0]?.content ?? "");
+checkOk(
+	"command: routing is extension traffic, not a typed prompt",
+	sentMessages[0]?.customType === "designer-playbook" && sentMessages[0]?.display === false,
+	JSON.stringify(sentMessages[0]),
+);
 checkOk("command: playbook does not notify", notes.length === 0, notes.join(" | "));
 
 for (const missing of ["document", "audit"]) {
@@ -382,9 +435,51 @@ for (const own of ["detect", "doctor"]) {
 	sentMessages.length = 0;
 	notes.length = 0;
 	await command!.handler(own, { cwd: deep, hasUI: true, ui: { notify } });
-	checkOk(`command: ${own} runs here rather than routing`, sentMessages.length === 0, sentMessages.join(" | "));
+	checkOk(`command: ${own} runs here rather than routing`, sentMessages.length === 0, JSON.stringify(sentMessages));
 	checkOk(`command: ${own} reports through a notification`, notes.length > 0, "no notification");
 }
+
+// --- the tool the model calls -----------------------------------------------
+
+checkOk("tool: registered", tool?.name === "design_check", String(tool?.name));
+checkOk("tool: advertises the two actions", "action" in (tool?.parameters.properties ?? {}), JSON.stringify(tool?.parameters));
+checkOk("tool: carries a prompt snippet", !!tool?.promptSnippet?.includes("design_check"), tool?.promptSnippet);
+checkOk(
+	"tool: guidelines name the tool, not 'this tool'",
+	!!tool?.promptGuidelines?.every((line) => line.includes("design_check")),
+	JSON.stringify(tool?.promptGuidelines),
+);
+
+// A file with one known anti-pattern, so the assertion is about a real finding rather than a string.
+notes.length = 0;
+writeFileSync(join(deep, "panel.css"), ".panel { border-left: 4px solid #c81414; border-radius: 8px; }");
+writeFileSync(join(deep, "DESIGN.md"), CLEAN);
+const runTool = async (params: Parameters<RegisterableTool["execute"]>[1]) => {
+	const result = await tool!.execute("call-1", params, undefined, undefined, { cwd: deep });
+	return result.content.map((block) => block.text).join("\n");
+};
+
+const detected = await runTool({ action: "detect" });
+checkOk("tool: detect reports the finding", detected.includes("side-tab"), detected);
+checkOk("tool: detect names the file", detected.includes("panel.css"), detected);
+
+const context = await runTool({ action: "context" });
+checkOk("tool: context reports the design file", context.includes("DESIGN"), context);
+checkOk("tool: context does not run a scan", !context.includes("side-tab"), context);
+
+const validated = await runTool({ action: "validate" });
+checkOk("tool: validate returns the spec report", validated.includes("conforms to the design.md spec"), validated);
+checkOk("tool: validate names the file", validated.includes(join(deep, "DESIGN.md")), validated);
+checkOk("tool: validate does not notify", notes.length === 0, notes.join(" | "));
+
+const missing = await tool!.execute("call-2", { action: "validate", target: "/does/not/exist.md" }, undefined, undefined, {
+	cwd: deep,
+});
+checkOk(
+	"tool: a missing file is a sentence, not a crash",
+	missing.content[0]?.text.startsWith("No DESIGN.md") ?? false,
+	missing.content[0]?.text ?? "",
+);
 
 rmSync(base, { recursive: true, force: true });
 

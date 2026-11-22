@@ -22,7 +22,7 @@
     "eval": "bun evals/run-evals.ts",
     "eval:grade": "bun evals/grade-evals.ts",
     "eval:test": "bun evals/test-grade.ts",
-    "sync:upstream": "bun extensions/designer/scripts/sync-upstream.mjs"
+    "import:guidance": "bun extensions/designer/scripts/import-guidance.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.2",
